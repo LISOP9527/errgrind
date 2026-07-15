@@ -1,0 +1,5 @@
+interface:
+  display_name: "Grilling"
+  short_description: "Grill relentlessly about a plan or design"
+policy:
+  allow_implicit_invocation: false

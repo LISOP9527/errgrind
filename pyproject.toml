@@ -1,0 +1,20 @@
+[project]
+name = "errgrind"
+version = "0.1.0"
+description = "错题训练器 — CLI 刷题软件"
+requires-python = ">=3.11"
+dependencies = [
+    "rich>=13.0.0",
+    "openai>=1.0.0",
+    "prompt_toolkit>=3.0.0",
+]
+
+[project.scripts]
+errgrind = "errgrind.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
