@@ -1,5 +1,6 @@
 pyproject.toml
 errgrind/__init__.py
+errgrind/__main__.py
 errgrind/config.py
 errgrind/main.py
 errgrind.egg-info/PKG-INFO
@@ -10,6 +11,9 @@ errgrind.egg-info/requires.txt
 errgrind.egg-info/top_level.txt
 errgrind/cli/__init__.py
 errgrind/cli/app.py
+errgrind/cli/commands.py
+errgrind/cli/state.py
+errgrind/cli/ui.py
 errgrind/db/__init__.py
 errgrind/db/ops.py
 errgrind/db/schema.py

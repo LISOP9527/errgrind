@@ -10,6 +10,8 @@ DEFAULT_CONFIG = {
     "provider": "gemini",
     "model": "gemini-3.5-flash",
     "api_key": "",
+    "drill_context_n": 10,
+    "grill_max_turns": 30,
 }
 
 
@@ -17,7 +19,10 @@ def load() -> dict:
     if not os.path.exists(CONFIG_PATH):
         return dict(DEFAULT_CONFIG)
     with open(CONFIG_PATH) as f:
-        return json.load(f)
+        cfg = json.load(f)
+    for k, v in DEFAULT_CONFIG.items():
+        cfg.setdefault(k, v)
+    return cfg
 
 
 def save(cfg: dict):

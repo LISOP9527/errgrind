@@ -7,6 +7,7 @@ from openai import OpenAI
 
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+GO_BASE_URL = "https://opencode.ai/zen/go/v1"
 
 
 class LLMError(Exception):
