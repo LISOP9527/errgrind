@@ -128,5 +128,9 @@ class Database:
         ).fetchall()
         return [(r["question"], r["grilling_summary"]) for r in rows]
 
+    def delete_error(self, error_id: int):
+        self.conn.execute("DELETE FROM error_records WHERE id = ?", (error_id,))
+        self.conn.commit()
+
     def close(self):
         self.conn.close()

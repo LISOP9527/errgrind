@@ -70,16 +70,16 @@ Drill 的目标是帮助用户建立新的思维模式，而不是立即验证 T
 
 | 命令 | 职责 |
 |---|---|
-| `/record` | 记录一个 error（只入库，状态 = `pending-grill`） |
-| `/resume` | 列表 → 方向键+Enter 选详情 → 详情页内 grill/teach |
+| `/record` | 通过三步输入弹窗记录一个 error（只入库，状态 = `pending-grill`） |
+| `/resume` | 双栏工作台浏览 error；方向键选择，Enter 默认处理，`g`/`t` 触发 grill/teach，`d` 删除 |
 | `/drill` | 用最近 N 条 grilled error 作为上下文，出综合开放题 |
-| `/status` | Panel 显示 pending-grill / pending-teach / done / 总计 数量 |
+| `/status` | 全屏状态看板显示 pending-grill / pending-teach / done / 总计数量 |
 | `/config` | 方向键+Enter 编辑：`drill_context_n`、`grill_max_turns`、`provider` |
 | `/model` | 同 provider 内切换 model（高频命令，独立） |
-| `/help` | Panel 显示命令列表 |
+| `/help` | 全屏命令指南 |
 | `/exit` | 退出 |
 
-工作流（grill → teach → drill）通过 `/record` 录入后，在 `/resume` 详情页内以 `g`/`t` 键按需触发，drill 是独立的 `/drill` 命令。
+工作流（grill → teach → drill）通过 `/record` 录入后，在 `/resume` 双栏工作台内以 `g`/`t` 键按需触发，drill 是独立的 `/drill` 命令。`d` 会先请求确认，再永久删除当前 error。
 
 ### Error 状态机
 
@@ -118,7 +118,7 @@ errgrind/
 │   │   ├── app.py             # 入口 + 事件循环 + 启动流程
 │   │   ├── commands.py        # slash command 注册与处理
 │   │   ├── state.py           # AppState（current_error_id, accessed_error_ids）
-│   │   └── ui.py              # I/O 工具（user_input / multiline_input / select_from_list）
+│   │   └── ui.py              # I/O 工具、全屏选择器与输入/确认弹窗
 │   ├── db/
 │   │   ├── schema.py          # 建表 SQL（单表 error_records）
 │   │   └── ops.py             # CRUD 操作
@@ -150,16 +150,15 @@ errgrind/
 4. 入库，状态 = `pending-grill`
 
 ### `/resume`
-1. 列出所有 error（编号 + 状态标签 + 题目摘要 + 时间）
-2. 方向键 + Enter 选 error
-3. 详情页：状态、时间、题目、思路概述、参考答案、grilling 摘要（若有）、partial 中断提示（若有）
-4. 按 `g` 开始/继续 grilling，按 `t` 开始/继续 teach，按 `b` 返回列表
-5. grilling/teach 完成后留在详情页（状态已更新）
+1. 打开全屏双栏工作台：左侧为 error 列表，右侧为当前 error 的摘要、思路与 grilling 摘要
+2. 方向键浏览；Enter 对 `pending-grill` 默认开始 grill，对其他状态默认开始 teach
+3. 按 `g` 开始/继续 grilling，按 `t` 开始/继续 teach，按 `d` 删除当前 error（需确认），按 `q`/Esc 返回
+4. grilling/teach/删除完成后返回并刷新工作台
 
 ### `/drill`
 1. 取最近 N 条（`pending-teach` + `done`）的（题目 + grilling_summary）作为上下文
-2. AI 生成综合开放题（JSON: `{question, reference_answer}`）
-3. 用户输入答案 + 思路（多行）
+2. AI 生成综合开放题（JSON 至少含 `question`、`reference_answer`，可附带 Pattern 元数据）
+3. 在答题弹窗内输入答案 + 思路（多行）
 4. LLM 判对错（JSON: `{is_correct, feedback}`）
 5. 答对 → 显示 ✓，什么也不做
 6. 答错 → 显示 ✗ + feedback + 新 error 入库（`pending-grill`）
@@ -234,13 +233,23 @@ errgrind
 errgrind
 # 在 CLI 内测试：
 /record        # 录入 error
-/resume        # 列表 → 详情 → grill → teach
+/resume        # 双栏工作台 → grill / teach / 删除
 /status        # 查看计数
 /drill         # 出综合题
 /config        # 编辑配置
 /help          # 命令列表
 /exit          # 退出
 ```
+
+## 自动化回归测试
+
+轻量离线测试用于防止状态流转、prompt 格式化和 `/drill` 分支回归；不调用真实 API，也不评估产品是否真正减少未来 Error。后者以实际使用和长期观察为准。
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+当前测试覆盖：prompt 模板格式化、Grill 结束标记、流式输出重试、Error 状态机、删除，以及 `/drill` 答对/答错分支。
 
 ---
 
@@ -251,4 +260,3 @@ errgrind
 - 经典功能（如输入输出）尽量调用已有库
 - 所有 prompt 应放入 `prompts/` 目录，用户可直接审阅
 - 尽量保证任何时候crtl+c都能不报错
-

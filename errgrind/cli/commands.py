@@ -1,11 +1,24 @@
 import json
-import sys
-from datetime import datetime
 
+from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.text import Text
 
 from .state import AppState
-from .ui import console, user_input, multiline_input, select_from_list, prompt_line, sysmsg, errmsg
+from .ui import (
+    console,
+    multiline_input,
+    select_from_list,
+    select_error_split_view,
+    sysmsg,
+    errmsg,
+    successmsg,
+    popup_input,
+    popup_content,
+    popup_drill_answer,
+    popup_confirm,
+)
 
 
 EXIT_KEYWORDS = ["理解了", "明白了", "好了", "结束"]
@@ -25,82 +38,40 @@ def _register(name, description, aliases=None):
     return wrap
 
 
-def _status_color(status: str) -> str:
-    return {
-        "pending-grill": "yellow",
-        "pending-teach": "cyan",
-        "done": "green",
-    }.get(status, "white")
-
-
-def _format_error_row(error) -> str:
-    q = error.question[:30].replace("\n", " ")
-    if len(error.question) > 30:
-        q += "..."
-    created = error.created_at.strftime("%Y-%m-%d %H:%M")
-    color = _status_color(error.status)
-    return f"#{error.id:<3} [{color}]{error.status}[/{color}]  {q}  [dim]{created}[/dim]"
-
-
-def _format_error_detail(error) -> str:
-    lines = [
-        f"  状态: [{_status_color(error.status)}]{error.status}[/{_status_color(error.status)}]",
-        f"  创建: {error.created_at.strftime('%Y-%m-%d %H:%M')}",
-        f"  更新: {error.updated_at.strftime('%Y-%m-%d %H:%M')}",
-        "",
-        f"  题目:",
-        f"    {error.question}",
-    ]
-    if error.user_thoughts:
-        lines.append("")
-        lines.append(f"  用户思路概述:")
-        lines.append(f"    {error.user_thoughts}")
-    if error.reference_answer:
-        lines.append("")
-        lines.append(f"  参考答案及解析:")
-        lines.append(f"    {error.reference_answer}")
-    return "\n".join(lines)
-
-
-def _show_detail_page(state: AppState, error):
-    console.print(Panel(_format_error_detail(error), title=f"Error #{error.id}", border_style="blue"))
-
-    if error.status == "pending-grill" and error.grilling_conversation:
-        console.print("[yellow][!] 上次 grilling 中途中断，按 g 继续[/yellow]")
-
-    if error.grilling_summary:
-        console.print(Panel(error.grilling_summary, title="Grilling 摘要", border_style="cyan"))
-
-    if error.status == "pending-grill":
-        console.print("\n[dim]下一步：开始分析这个错误（grill）[/dim]")
-    elif error.status == "pending-teach":
-        console.print("\n[dim]下一步：讲解此题（teach）[/dim]")
-
-    actions = [("g", "grill"), ("b", "back")]
-    if error.grilling_conversation:
-        actions.insert(1, ("t", "teach"))
-
-    idx = select_from_list(
-        [f"[{k}]{name}" for k, name in actions],
-        lambda x: x,
-        footer="[Enter]选择 [q]返回",
-    )
-    if idx is None:
-        return "b"
-    return actions[idx][0]
-
-
 def _show_context_recap(conversation_json: str, last_n: int = 3):
     messages = json.loads(conversation_json)
     user_assistant = [m for m in messages if m["role"] in ("user", "assistant")]
     recent = user_assistant[-last_n * 2:] if len(user_assistant) > last_n * 2 else user_assistant
     if recent:
-        console.print("[dim]--- 上次对话回顾 ---[/dim]")
+        console.print("[dim] ──────────────────── 上次对话回顾 ────────────────────[/dim]")
         for msg in recent:
-            role = "你" if msg["role"] == "user" else "导师"
+            role = "👤 你" if msg["role"] == "user" else "🧠 导师"
             text = msg["content"][:150] + "..." if len(msg["content"]) > 150 else msg["content"]
-            console.print(f"[dim]{role}: {text}[/dim]")
-        console.print("[dim]---[/dim]")
+            console.print(f" [dim]{role}: {text}[/dim]")
+        console.print("[dim] ──────────────────────────────────────────────────────[/dim]")
+
+
+def _llm_chat(messages, llm):
+    stream_chat = getattr(llm, "stream_chat", None)
+    if not callable(stream_chat):
+        with console.status("[bold cyan]🧠 导师思考中...", spinner="dots"):
+            return llm.chat(messages)
+
+    collected = []
+    with Live(Text("🧠 导师思考中..."), refresh_per_second=15) as live:
+        def on_token(token: str):
+            collected.append(token)
+            live.update(Text("".join(collected)))
+
+        return stream_chat(messages, on_token)
+
+
+def _is_grilling_complete(response: str) -> bool:
+    return response.strip().endswith("[GRILLING_END]")
+
+
+def _grilling_summary(response: str) -> str:
+    return response.strip()[: -len("[GRILLING_END]")].strip()
 
 
 def _run_grilling(state: AppState, error):
@@ -127,72 +98,75 @@ def _run_grilling(state: AppState, error):
         _show_context_recap(error.grilling_conversation)
 
     if not has_conversation:
-        console.print("[dim]思考中...[/dim]")
         try:
-            resp = state.llm.chat(messages)
+            resp = _llm_chat(messages, state.llm)
         except Exception as e:
-            console.print(f"[bold red]API 错误: {e}[/bold red]")
+            errmsg(f"API 错误: {e}")
             return
-        console.print(Panel(resp, title="导师", border_style="cyan"))
+        complete = _is_grilling_complete(resp)
+        clean_text = _grilling_summary(resp) if complete else resp
+        console.print(Panel(Markdown(clean_text), title="[bold cyan]🧠 导师 (Grill)[/bold cyan]", border_style="cyan", padding=(1, 2)))
         messages.append({"role": "assistant", "content": resp})
 
-        if resp.strip().endswith("[GRILLING_END]"):
-            summary = resp[: -len("[GRILLING_END]")].strip()
+        if complete:
+            summary = _grilling_summary(resp)
             messages[-1]["content"] = summary
             state.db.update_grilling(error.id, json.dumps(messages, ensure_ascii=False), summary)
-            sysmsg("✓ Grilling 完成")
+            successmsg("Grilling 思维审讯完成")
             return
     else:
         if messages and messages[-1]["role"] == "user":
-            console.print("[dim]正在补全上次的回应...[/dim]")
             try:
-                resp = state.llm.chat(messages)
+                resp = _llm_chat(messages, state.llm)
             except Exception as e:
-                console.print(f"[bold red]API 错误: {e}[/bold red]")
+                errmsg(f"API 错误: {e}")
                 return
-            console.print(Panel(resp, title="导师", border_style="cyan"))
+            complete = _is_grilling_complete(resp)
+            clean_text = _grilling_summary(resp) if complete else resp
+            console.print(Panel(Markdown(clean_text), title="[bold cyan]🧠 导师 (Grill)[/bold cyan]", border_style="cyan", padding=(1, 2)))
             messages.append({"role": "assistant", "content": resp})
 
-            if resp.strip().endswith("[GRILLING_END]"):
-                summary = resp[: -len("[GRILLING_END]")].strip()
+            if complete:
+                summary = _grilling_summary(resp)
                 messages[-1]["content"] = summary
                 state.db.update_grilling(error.id, json.dumps(messages, ensure_ascii=False), summary)
-                sysmsg("✓ Grilling 完成")
+                successmsg("Grilling 思维审讯完成")
                 return
 
     max_turns = state.cfg.get("grill_max_turns", 30)
     try:
         for _ in range(max_turns):
-            reply = multiline_input("[bold cyan]你的回答[/bold cyan]")
+            reply = multiline_input("[bold cyan]👤 你的回答[/bold cyan]")
             messages.append({"role": "user", "content": reply})
 
-            console.print("[dim]思考中...[/dim]")
             try:
-                resp = state.llm.chat(messages)
+                resp = _llm_chat(messages, state.llm)
             except Exception as e:
-                console.print(f"[bold red]API 错误: {e}[/bold red]")
+                errmsg(f"API 错误: {e}")
                 state.db.save_grilling_conversation(error.id, json.dumps(messages, ensure_ascii=False))
                 state.db.set_status(error.id, "pending-grill")
                 return
 
-            console.print(Panel(resp, title="导师", border_style="cyan"))
+            complete = _is_grilling_complete(resp)
+            clean_text = _grilling_summary(resp) if complete else resp
+            console.print(Panel(Markdown(clean_text), title="[bold cyan]🧠 导师 (Grill)[/bold cyan]", border_style="cyan", padding=(1, 2)))
             messages.append({"role": "assistant", "content": resp})
 
-            if resp.strip().endswith("[GRILLING_END]"):
-                summary = resp[: -len("[GRILLING_END]")].strip()
+            if complete:
+                summary = _grilling_summary(resp)
                 messages[-1]["content"] = summary
                 state.db.update_grilling(error.id, json.dumps(messages, ensure_ascii=False), summary)
-                sysmsg("✓ Grilling 完成")
+                successmsg("Grilling 思维审讯完成！状态已更新为待讲解")
                 return
     except (KeyboardInterrupt, EOFError):
-        sysmsg("Grilling 中断")
+        sysmsg("Grilling 对话已保存（中断）")
         state.db.save_grilling_conversation(error.id, json.dumps(messages, ensure_ascii=False))
         state.db.set_status(error.id, "pending-grill")
 
 
 def _run_teaching(state: AppState, error):
     if not error.grilling_conversation:
-        sysmsg("请先 grill")
+        sysmsg("请先进行 grill 审讯分析")
         return
 
     is_partial = False
@@ -221,93 +195,99 @@ def _run_teaching(state: AppState, error):
             {"role": "user", "content": "请开始讲解"},
         ]
 
-        console.print("[dim]思考中...[/dim]")
+        console.print("[dim]🧠 导师准备讲解中...[/dim]")
         try:
             resp = state.llm.chat(messages)
         except Exception as e:
-            console.print(f"[bold red]API 错误: {e}[/bold red]")
+            errmsg(f"API 错误: {e}")
             return
-        console.print(Panel(resp, title="讲解", border_style="green"))
+        console.print(Panel(Markdown(resp), title="[bold green]📖 针对性讲解 (Teach)[/bold green]", border_style="green", padding=(1, 2)))
         messages.append({"role": "assistant", "content": resp})
     else:
         console.print("[dim]正在补全上次的回应...[/dim]")
         try:
             resp = state.llm.chat(messages)
         except Exception as e:
-            console.print(f"[bold red]API 错误: {e}[/bold red]")
+            errmsg(f"API 错误: {e}")
             return
-        console.print(Panel(resp, title="解答", border_style="green"))
+        console.print(Panel(Markdown(resp), title="[bold green]📖 针对性解答[/bold green]", border_style="green", padding=(1, 2)))
         messages.append({"role": "assistant", "content": resp})
 
     try:
         while True:
-            reply = multiline_input("[bold green]有疑问可以继续提问，输入「理解了」结束[/bold green]")
+            reply = multiline_input("[bold green]💬 提问/讨论（输入「理解了」结束本题讲解）[/bold green]")
             if any(kw in reply for kw in EXIT_KEYWORDS):
                 state.db.update_teach(error.id, json.dumps(messages, ensure_ascii=False))
-                sysmsg("✓ 讲解完成")
+                successmsg("讲解完成！错题已标记为 [已完成]")
                 return
             messages.append({"role": "user", "content": reply})
-            console.print("[dim]思考中...[/dim]")
+            console.print("[dim]🧠 导师思考中...[/dim]")
             try:
                 resp = state.llm.chat(messages)
             except Exception as e:
-                console.print(f"[bold red]API 错误: {e}[/bold red]")
+                errmsg(f"API 错误: {e}")
                 state.db.save_teach_conversation(error.id, json.dumps(messages, ensure_ascii=False))
                 return
-            console.print(Panel(resp, title="解答", border_style="green"))
+            console.print(Panel(Markdown(resp), title="[bold green]📖 针对性解答[/bold green]", border_style="green", padding=(1, 2)))
             messages.append({"role": "assistant", "content": resp})
     except (KeyboardInterrupt, EOFError):
-        sysmsg("讲解中断")
+        sysmsg("讲解对话已保存（中断）")
         state.db.save_teach_conversation(error.id, json.dumps(messages, ensure_ascii=False))
 
 
 @_register("record", "记录一个 error")
 def _cmd_record(state, arg):
-    question = multiline_input("请粘贴你做错的题目")
-    if not question:
-        console.print("[red]题目不能为空[/red]")
+    question = popup_input("📝 记录 Error (1/3)", "请粘贴你做错的题目：")
+    if not question or not question.strip():
+        sysmsg("记录已取消")
         return
-    user_thoughts = multiline_input("你的思路概述（可留空，留空表示思考过但没做出答案）")
-    reference_answer = multiline_input("参考答案及解析（不知道可留空）")
+
+    user_thoughts = popup_input("📝 记录 Error (2/3)", "你的思路概述（可留空，留空表示思考过但没做出答案）：")
+    if user_thoughts is None:
+        sysmsg("记录已取消")
+        return
+
+    reference_answer = popup_input("📝 记录 Error (3/3)", "参考答案及解析（不知道可留空）：")
+    if reference_answer is None:
+        sysmsg("记录已取消")
+        return
 
     error_id = state.db.create_error(
-        question=question,
-        user_thoughts=user_thoughts or None,
-        reference_answer=reference_answer or None,
+        question=question.strip(),
+        user_thoughts=user_thoughts.strip() or None,
+        reference_answer=reference_answer.strip() or None,
     )
-    sysmsg(f"✓ Error #{error_id} 已记录")
-    sysmsg("输入 /resume 开始处理")
+    successmsg(f"已成功录入错题库 (Error #{error_id})")
+    sysmsg("输入 /resume 开始处理错题")
 
 
-@_register("resume", "查看/处理 error（列表 → grill/teach）")
+@_register("resume", "查看/处理 error（双栏工作台 → grill/teach）")
 def _cmd_resume(state, arg):
-    errors = state.db.list_all_errors()
-    if not errors:
-        sysmsg("暂无 error 记录，用 /record 添加")
-        return
-
     while True:
-        idx = select_from_list(
-            errors,
-            lambda e: _format_error_row(e),
-            title="Error 列表",
-        )
-        if idx is None:
+        errors = state.db.list_all_errors()
+        if not errors:
+            sysmsg("暂无 error 记录，用 /record 添加")
+            return
+
+        idx, action = select_error_split_view(errors)
+        if idx is None or action is None:
             return
 
         error = state.db.get_error(errors[idx].id)
         if error is None:
             continue
 
-        while True:
-            error = state.db.get_error(error.id)
-            action = _show_detail_page(state, error)
-            if action == "g":
-                _run_grilling(state, error)
-            elif action == "t":
-                _run_teaching(state, error)
-            elif action == "b":
-                break
+        state.accessed_error_ids.add(error.id)
+
+        if action == "g":
+            _run_grilling(state, error)
+        elif action == "t":
+            _run_teaching(state, error)
+        elif action == "d":
+            confirmed = popup_confirm(f"确认删除 Error #{idx + 1}？")
+            if confirmed:
+                state.db.delete_error(error.id)
+                successmsg(f"Error #{idx + 1} 已从错题库删除")
 
 
 @_register("drill", "出综合练习题")
@@ -316,7 +296,7 @@ def _cmd_drill(state, arg):
     context = state.db.get_drill_context(n)
 
     if not context:
-        sysmsg("暂无可用于出题的 error，请先 /resume 完成 grilling")
+        sysmsg("暂无可用于出题的 error，请先通过 /resume 完成至少一条 error 的 grilling")
         return
 
     summary_list = "\n\n".join(
@@ -324,9 +304,8 @@ def _cmd_drill(state, arg):
         for i, (q, s) in enumerate(context)
     )
 
+    sysmsg("🧠 正在根据近期的 Error Pattern 生成综合演练题...")
     drill_prompt = state.prompts.load("drill.md").format(summary_list=summary_list)
-
-    console.print("[dim]思考中...[/dim]")
     try:
         result = state.llm.chat_json([{"role": "user", "content": drill_prompt}])
     except Exception as e:
@@ -336,20 +315,17 @@ def _cmd_drill(state, arg):
     question = result["question"]
     reference_answer = result["reference_answer"]
 
-    console.print(Panel(f"[bold]{question}[/bold]", title="练习题", border_style="yellow"))
-
-    user_response = multiline_input("[bold yellow]请输入你的答案和思路（思路可选）[/bold yellow]")
+    user_response = popup_drill_answer(question)
     if not user_response:
-        sysmsg("未作答，取消")
+        sysmsg("已取消作答")
         return
 
+    sysmsg("⚖️ 判分评估中...")
     judge_prompt = state.prompts.load("judge.md").format(
         question=question,
         reference_answer=reference_answer,
         user_response=user_response,
     )
-
-    console.print("[dim]判分中...[/dim]")
     try:
         judgment = state.llm.chat_json([{"role": "user", "content": judge_prompt}])
     except Exception as e:
@@ -360,30 +336,54 @@ def _cmd_drill(state, arg):
     feedback = judgment.get("feedback", "")
 
     if is_correct:
-        sysmsg("✓ 回答正确")
+        popup_content("🎉 回答正确！思维 Pattern 掌握良好！", title="演练评估结果")
+        successmsg("回答正确！成功攻克思维盲区！")
     else:
-        sysmsg("✗ 答错了")
+        body = [("bold red", "❌ 答错了，相关 Pattern 仍需巩固\n\n")]
         if feedback:
-            console.print(Panel(feedback, title="反馈", border_style="red"))
+            body.append(("", f"💡 评估反馈:\n{feedback}\n"))
+        popup_content(body, title="演练评估结果")
+        errmsg("答错了，已自动将此衍生题作为新 Error 入库")
 
         new_id = state.db.create_error(
             question=question,
             user_thoughts=user_response,
             reference_answer=reference_answer,
         )
-        sysmsg(f"新 error #{new_id} 已入库，用 /resume 处理")
+        sysmsg(f"新 error (ID: #{new_id}) 已入库，可随时输入 /resume 处理")
 
 
 @_register("status", "查看 error 状态统计")
 def _cmd_status(state, arg):
     counts = state.db.count_by_status()
-    lines = [
-        f"  [yellow]待 grill:[/yellow]  {counts['pending-grill']}",
-        f"  [cyan]待 teach:[/cyan]  {counts['pending-teach']}",
-        f"  [green]已完成:[/green]    {counts['done']}",
-        f"  总计:      {counts['total']}",
+    total = counts['total']
+
+    def make_bar(cnt, total_num, width=15):
+        if total_num == 0:
+            return "[░░░░░░░░░░░░░░░]   0.0%"
+        pct = (cnt / total_num) * 100
+        filled = int(round((cnt / total_num) * width))
+        bar = "█" * filled + "░" * (width - filled)
+        return f"[{bar}]  {pct:>5.1f}%"
+
+    body = [
+        ("class:title", "📊 ErrGrind 错题分析看板\n\n"),
+        ("", "  ⏳ 待审讯 (pending-grill):  "),
+        ("class:badge-grill", f"{counts['pending-grill']:<3} "),
+        ("", f"{make_bar(counts['pending-grill'], total)}\n"),
+
+        ("", "  📖 待讲解 (pending-teach):  "),
+        ("class:badge-teach", f"{counts['pending-teach']:<3} "),
+        ("", f"{make_bar(counts['pending-teach'], total)}\n"),
+
+        ("", "  ✅ 已完成 (done):           "),
+        ("class:badge-done", f"{counts['done']:<3} "),
+        ("", f"{make_bar(counts['done'], total)}\n"),
+
+        ("class:dim", "  ───────────────────────────────────────────────────\n"),
+        ("class:subtitle", f"  🗂  数据库累计错题总数:  {total} 条\n"),
     ]
-    console.print(Panel("\n".join(lines), title="状态", border_style="blue"))
+    popup_content(body, title="错题库状态看板")
 
 
 @_register("config", "编辑配置（上下文条数、最大轮数、提供商）")
@@ -401,7 +401,7 @@ def _cmd_config(state, arg):
         idx = select_from_list(
             [item[1] for item in items],
             lambda x: x,
-            title="配置项",
+            title="系统参数配置",
         )
         if idx is None:
             return
@@ -409,35 +409,45 @@ def _cmd_config(state, arg):
         key = items[idx][0]
 
         if key == "drill_context_n":
-            val = user_input(
-                f"新的 drill_contextn (当前: {state.cfg.get('drill_context_n', 10)})",
-                default=str(state.cfg.get('drill_context_n', 10)),
+            current = state.cfg.get("drill_context_n", 10)
+            val = popup_input(
+                "编辑 drill_context_n",
+                f"输入新值（当前: {current}）：",
+                multiline=False,
             )
+            if val is None:
+                sysmsg("取消")
+                continue
             try:
-                n = int(val)
+                n = int(val.strip())
                 if n < 1:
                     errmsg("必须 >= 1")
                     continue
                 state.cfg["drill_context_n"] = n
                 save_config(state.cfg)
-                sysmsg(f"✓ drill_context_n = {n}")
+                successmsg(f"drill_context_n 已设置为 {n}")
                 items[0] = (key, f"drill_context_n = {n}")
             except ValueError:
                 errmsg("请输入整数")
 
         elif key == "grill_max_turns":
-            val = user_input(
-                f"新的 grill_max_turns (当前: {state.cfg.get('grill_max_turns', 30)})",
-                default=str(state.cfg.get('grill_max_turns', 30)),
+            current = state.cfg.get("grill_max_turns", 30)
+            val = popup_input(
+                "编辑 grill_max_turns",
+                f"输入新值（当前: {current}）：",
+                multiline=False,
             )
+            if val is None:
+                sysmsg("取消")
+                continue
             try:
-                n = int(val)
+                n = int(val.strip())
                 if n < 1:
                     errmsg("必须 >= 1")
                     continue
                 state.cfg["grill_max_turns"] = n
                 save_config(state.cfg)
-                sysmsg(f"✓ grill_max_turns = {n}")
+                successmsg(f"grill_max_turns 已设置为 {n}")
                 items[1] = (key, f"grill_max_turns = {n}")
             except ValueError:
                 errmsg("请输入整数")
@@ -447,7 +457,7 @@ def _cmd_config(state, arg):
                 _change_provider(state.cfg)
                 state.llm = _make_llm(state.cfg)
                 save_config(state.cfg)
-                sysmsg(f"✓ provider = {state.cfg['provider']}")
+                successmsg(f"provider 已切换为 {state.cfg['provider']}")
                 items[2] = (key, f"provider = {state.cfg['provider']}")
             except (KeyboardInterrupt, EOFError):
                 sysmsg("取消")
@@ -462,29 +472,40 @@ def _cmd_model(state, arg):
         _select_model(state.cfg)
         state.llm = _make_llm(state.cfg)
         save_config(state.cfg)
-        sysmsg(f"✓ model = {state.cfg.get('model', '?')}")
+        successmsg(f"model 已切换为 {state.cfg.get('model', '?')}")
     except (KeyboardInterrupt, EOFError):
         sysmsg("取消")
 
 
-@_register("help", "显示此帮助", ["h"])
+@_register("help", "显示此帮助")
 def _cmd_help(state, arg):
-    seen = set()
-    rows = []
-    width = 0
-    for name in COMMANDS:
-        if name in seen:
-            continue
-        seen.add(name)
-        desc = COMMAND_DESCRIPTIONS.get(name, "")
-        rows.append((name, desc))
-        width = max(width, len(name))
-    lines = ["[bold]命令列表[/bold]", ""]
-    for name, desc in rows:
-        lines.append(f"  [bold]/{name:<{width}}[/bold]  {desc}")
-    console.print(Panel("\n".join(lines), title="帮助", border_style="blue"))
+    groups = [
+        ("📝 错题与演练工作流", [
+            ("/record", "录入一个新的 error (进入 pending-grill)"),
+            ("/resume", "打开双栏工作台 (进行 grill 审讯 / teach 讲解)"),
+            ("/drill", "结合近期 error 生成综合演练测试题"),
+        ]),
+        ("📊 状态与看板", [
+            ("/status", "查看错题库状态与完成进度图表看板"),
+        ]),
+        ("⚙️ 系统与模型配置", [
+            ("/config", "调整 drill 条数、grill 轮数或 AI 提供商"),
+            ("/model", "快捷切换 AI 模型 (如 gemini-3.5-flash / deepseek-chat)"),
+            ("/help", "显示本命令帮助指南"),
+            ("/exit", "退出 ErrGrind 应用"),
+        ])
+    ]
+
+    body = [("class:title", "✦ ErrGrind Slash 命令指南\n\n")]
+    for group_title, cmds in groups:
+        body.append(("class:subtitle", f" {group_title}\n"))
+        for cmd_name, desc in cmds:
+            body.append(("", f"   {cmd_name:<10}  {desc}\n"))
+        body.append(("", "\n"))
+
+    popup_content(body, title="命令指南")
 
 
-@_register("exit", "退出", ["quit"])
+@_register("exit", "退出")
 def _cmd_exit(state, arg):
     raise SystemExit(0)

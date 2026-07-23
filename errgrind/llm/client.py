@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from collections.abc import Callable
 from typing import Optional
 
 from openai import OpenAI
@@ -40,9 +41,39 @@ class LLMClient:
                 return resp.choices[0].message.content
             except Exception as e:
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                 else:
                     raise LLMError(f"API 调用失败: {e}")
+
+    def stream_chat(
+        self,
+        messages: list[dict],
+        on_token: Callable[[str], None],
+        **kwargs,
+    ) -> str:
+        """Stream one response without retrying after text has reached the UI."""
+        for attempt in range(self.max_retries):
+            collected = []
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    **kwargs,
+                )
+                for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                        token = chunk.choices[0].delta.content
+                        collected.append(token)
+                        on_token(token)
+                return "".join(collected)
+            except Exception as e:
+                if collected:
+                    raise LLMError(f"流式 API 调用中断: {e}") from e
+                if attempt < self.max_retries - 1:
+                    time.sleep(2**attempt)
+                else:
+                    raise LLMError(f"API 调用失败: {e}") from e
 
     def chat_json(self, messages: list[dict], **kwargs) -> dict:
         text = self.chat(messages, response_format={"type": "json_object"}, **kwargs)

@@ -105,3 +105,16 @@ Action 的价值，在于真正减少未来的 Error。
 > **它是否能够帮助系统减少未来的 Error？**
 
 如果不能，那么即使它很有趣，也不应该优先实现。
+
+# 架构解耦原则（TUI → GUI / Mobile）
+
+为了保证从 TUI 平滑演进到 GUI 及 Mobile App，须遵循以下原则：
+
+1. **Headless Engine（核心与 UI 解耦）**：Core Engine 纯粹负责逻辑（State 建模、Policy 决策、Action 触发），UI 仅作为渲染壳。
+2. **结构化数据传递**：Engine 与 UI 之间只传递结构化数据（JSON/对象），禁止在 Core 逻辑中硬编码终端排版或颜色代码。
+3. **标准数据协议**：文本与公式统一使用标准 Markdown + LaTeX 输出，确保跨平台（TUI / Web GUI / Mobile）无缝复用渲染。
+
+# 一些待考虑的问题
+
+- mvp做完后，是否fork一个agent？
+- 是否考虑做成某个agent的插件？

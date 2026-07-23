@@ -1,6 +1,7 @@
 import sys
 
 import httpx
+from rich.columns import Columns
 from rich.panel import Panel
 
 from ..config import load as load_config, save as save_config
@@ -10,7 +11,7 @@ from ..llm.gemini import GeminiClient, GeminiError
 from ..llm.prompts import PromptManager
 from .commands import COMMANDS, COMMAND_DESCRIPTIONS
 from .state import AppState
-from .ui import console, user_input, prompt_line, init_completer, sysmsg, errmsg
+from .ui import console, prompt_line, init_completer, sysmsg, errmsg, select_from_list, popup_input
 
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -49,7 +50,7 @@ def _fetch_llm_models(base_url, api_key):
 
 
 def _select_model(cfg):
-    console.print("[dim]正在获取可用模型...[/dim]")
+    console.print(" [dim]正在获取可用模型...[/dim]")
     provider = cfg["provider"]
     models = []
     default_model = ""
@@ -66,25 +67,36 @@ def _select_model(cfg):
         default_model = "deepseek-v4-flash"
 
     if models:
-        console.print("[bold]选择模型[/bold]")
-        for i, m in enumerate(models):
-            console.print(f"  {i+1}. {m}")
-        mc = user_input(f"请输入 1-{len(models)}，回车默认 1", default="1")
-        cfg["model"] = models[int(mc) - 1]
+        idx = select_from_list(models, lambda m: m, title="选择 AI 模型")
+        if idx is None:
+            raise KeyboardInterrupt
+        cfg["model"] = models[idx]
     else:
-        cfg["model"] = user_input("无法获取模型列表，请手动输入模型 ID", default=default_model)
+        val = popup_input("选择模型", "无法获取模型列表，请手动输入模型 ID：", multiline=False)
+        if val is None:
+            raise KeyboardInterrupt
+        cfg["model"] = val.strip() or default_model
 
 
 def _change_provider(cfg):
     provider_keys = list(PROVIDERS.keys())
-    console.print("[bold]选择 AI 提供商[/bold]")
-    for i, k in enumerate(provider_keys):
-        console.print(f"  {i+1}. {PROVIDERS[k][0]}")
-    choice = user_input(f"请输入 1-{len(provider_keys)}，回车默认 1", default="1")
-    cfg["provider"] = provider_keys[int(choice) - 1]
-    cfg["api_key"] = user_input("输入 API key")
+    provider_names = [PROVIDERS[k][0] for k in provider_keys]
+    idx = select_from_list(provider_names, lambda n: n, title="选择 AI 提供商")
+    if idx is None:
+        raise KeyboardInterrupt
+    cfg["provider"] = provider_keys[idx]
+
+    val = popup_input("API Key", "输入 API key：", multiline=False)
+    if val is None:
+        raise KeyboardInterrupt
+    cfg["api_key"] = val.strip()
+
     if cfg["provider"] == "opencode":
-        cfg["base_url"] = user_input("输入 API 地址", default=GO_BASE_URL)
+        base = popup_input("API 地址", f"输入 API 地址（默认 {GO_BASE_URL}）：", multiline=False)
+        if base is None:
+            raise KeyboardInterrupt
+        cfg["base_url"] = base.strip() or GO_BASE_URL
+
     _select_model(cfg)
 
 
@@ -117,32 +129,57 @@ def _ensure_config():
         return cfg
 
     try:
-        console.print(Panel("[bold]首次使用，请配置 API[/bold]", border_style="blue"))
+        console.print(Panel("[bold cyan]✦ 首次使用，请配置 AI 模型接口[/bold cyan]", border_style="cyan"))
         _change_provider(cfg)
         save_config(cfg)
-        console.print(f"[green]配置已保存到 ~/.config/errgrind/config.json[/green]\n")
+        console.print(f" [bold green]✔ 配置已成功保存至 ~/.config/errgrind/config.json[/bold green]\n")
     except KeyboardInterrupt:
-        console.print("\n[yellow]已取消[/yellow]")
+        console.print("\n[yellow]已取消设置[/yellow]")
         sys.exit(0)
     return cfg
 
 
-def _show_welcome():
-    console.print(Panel(
-        "把一次错误，变成下一次不再犯。\n"
-        "输入 [bold]/help[/bold] 查看命令列表。",
-        title="[bold]ErrGrind[/bold]",
-        title_align="center",
-        border_style="blue",
-        padding=(1, 2),
-        expand=False,
-    ))
+def _show_welcome(state: AppState):
+    ascii_banner = r"""[bold cyan]
+  ______           _____     _            _
+ |  ____|         / ____|   (_)          | |
+ | |__   _ __ _ _| |  __ ___ _ _ __   __| |
+ |  __| | '__| '__| | |_ | '__| | '_ \ / _` |
+ | |____| |  | |  | |__| | |  | | | | | (_| |
+ |______|_|_ |_|   \_____|_|  |_|_| |_|\__,_|
+[/bold cyan]"""
+
+    counts = state.db.count_by_status()
+    provider_name = PROVIDERS.get(state.cfg.get("provider", ""), ("未知",))[0]
+    model_name = state.cfg.get("model", "默认")
+
+    console.print(ascii_banner)
+    console.print(" [bold bright_cyan]✦ 把一次错误，变成下一次不再犯。[/bold bright_cyan]\n")
+
+    engine_panel = Panel(
+        f"[bold bright_cyan]{provider_name}[/bold bright_cyan]\n[dim]模型:[/dim] [cyan]{model_name}[/cyan]",
+        title="[bold cyan]🧠 AI Engine[/bold cyan]",
+        border_style="cyan",
+        expand=True,
+    )
+
+    stats_panel = Panel(
+        f"[yellow]⏳ 待审讯: {counts['pending-grill']}[/yellow]   "
+        f"[cyan]📖 待讲解: {counts['pending-teach']}[/cyan]\n"
+        f"[green]✅ 已完成: {counts['done']}[/green]   "
+        f"[dim]🗂  总计: {counts['total']} 条[/dim]",
+        title="[bold cyan]📊 错题库概览[/bold cyan]",
+        border_style="cyan",
+        expand=True,
+    )
+
+    console.print(Columns([engine_panel, stats_panel], equal=True))
+    console.print("\n [dim]💡 提示：输入 [bold bright_white]/help[/bold bright_white] 查看命令列表，输入 [bold bright_white]/resume[/bold bright_white] 进入错题工作台[/dim]\n")
 
 
 def _print_separator():
-    width = console.width or 80
-    width = min(max(width, 20), 80)
-    console.print(f"[dim]{'─' * width}[/dim]")
+    width = min(max(console.width or 80, 20), 80)
+    console.print(f"[dim cyan]{'─' * width}[/dim cyan]")
 
 
 def run_session():
@@ -158,7 +195,7 @@ def run_session():
 
     state = AppState(db=db, llm=llm, prompts=prompts, cfg=cfg)
 
-    _show_welcome()
+    _show_welcome(state)
     init_completer(COMMAND_DESCRIPTIONS)
 
     while True:
@@ -182,13 +219,15 @@ def run_session():
                     handler(state, arg)
                 except SystemExit:
                     break
+                except KeyboardInterrupt:
+                    break
                 except (LLMError, GeminiError) as e:
                     errmsg(f"API 错误: {e}")
                 except Exception as e:
                     errmsg(f"错误: {e}")
             else:
-                sysmsg(f"未知命令: {cmd}，输入 /help 查看命令")
+                sysmsg(f"未知命令: {cmd}，输入 /help 查看命令列表")
         else:
-            sysmsg("输入 / 开头的命令，/help 查看全部")
+            sysmsg("请输入以 / 开头的命令（如 /resume），输入 /help 查看全部")
 
     db.close()
