@@ -4,16 +4,14 @@ from datetime import datetime
 from typing import Optional
 
 from .schema import create_tables
+from ..config import prepare_database_path
 from ..models.types import ErrorRecord
 
 
-DB_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-DB_PATH = os.path.join(DB_DIR, "errgrind.db")
-
-
 class Database:
-    def __init__(self, db_path: str = DB_PATH):
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    def __init__(self, db_path: str | None = None):
+        db_path = db_path or prepare_database_path()
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         create_tables(self.conn)
@@ -87,14 +85,6 @@ class Database:
         )
         self.conn.commit()
 
-    def clear_teach_and_summary(self, error_id: int):
-        self.conn.execute(
-            "UPDATE error_records SET teach_conversation = NULL, grilling_summary = NULL, "
-            "updated_at = datetime('now') WHERE id = ?",
-            (error_id,),
-        )
-        self.conn.commit()
-
     def set_status(self, error_id: int, status: str):
         self.conn.execute(
             "UPDATE error_records SET status = ?, updated_at = datetime('now') WHERE id = ?",
@@ -123,7 +113,7 @@ class Database:
             "SELECT question, grilling_summary FROM error_records "
             "WHERE status IN ('pending-teach', 'done') "
             "AND grilling_summary IS NOT NULL "
-            "ORDER BY updated_at DESC LIMIT ?",
+            "ORDER BY updated_at DESC, id DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [(r["question"], r["grilling_summary"]) for r in rows]

@@ -1,11 +1,12 @@
 [project]
 name = "errgrind"
 version = "0.1.0"
-description = "错题训练器 — CLI 刷题软件"
+description = "通过用户使用过程中的 Evidence 建立用户的 Thinking Model（认知模型），识别可能导致未来 Error 的 Pattern，并利用这个 Model 持续帮助用户优化，从而减少未来的 Error。"
 requires-python = ">=3.11"
 dependencies = [
     "rich>=13.0.0",
     "openai>=1.0.0",
+    "httpx>=0.27.0",
     "prompt_toolkit>=3.0.0",
 ]
 

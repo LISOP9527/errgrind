@@ -23,3 +23,5 @@ errgrind/llm/gemini.py
 errgrind/llm/prompts.py
 errgrind/models/__init__.py
 errgrind/models/types.py
+tests/test_regressions.py
+tests/test_workflows.py

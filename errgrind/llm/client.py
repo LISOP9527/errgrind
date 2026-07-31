@@ -76,8 +76,37 @@ class LLMClient:
                     raise LLMError(f"API 调用失败: {e}") from e
 
     def chat_json(self, messages: list[dict], **kwargs) -> dict:
-        text = self.chat(messages, response_format={"type": "json_object"}, **kwargs)
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as e:
-            raise LLMError(f"JSON 解析失败: {e}\n原始响应: {text}")
+        kwargs.setdefault("temperature", 0.2)
+        retry_messages = list(messages)
+        last_error = None
+        last_text = ""
+        for attempt in range(self.max_retries):
+            last_text = self.chat(
+                retry_messages,
+                response_format={"type": "json_object"},
+                **kwargs,
+            )
+            try:
+                result = json.loads(last_text)
+                if not isinstance(result, dict):
+                    raise ValueError("顶层必须是 JSON 对象")
+                return result
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    retry_messages = [
+                        *messages,
+                        {
+                            "role": "assistant",
+                            "content": (
+                                last_text
+                                if isinstance(last_text, str)
+                                else repr(last_text)
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": "上次响应不是合法 JSON 对象。只重新输出完整 JSON，不要使用 Markdown 代码块。",
+                        },
+                    ]
+        raise LLMError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")

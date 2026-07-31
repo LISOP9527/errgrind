@@ -1,7 +1,22 @@
+import json
+import tempfile
 import unittest
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from errgrind.cli.commands import _grilling_summary, _is_grilling_complete
+from errgrind.config import prepare_database_path
+from errgrind.cli.ui import (
+    _format_math_for_terminal,
+    render_error_detail,
+    render_markdown_to_formatted_text,
+    render_markdown_to_plain_text,
+    render_terminal_markdown,
+)
 from errgrind.llm.client import LLMClient, LLMError
+from errgrind.llm.gemini import GeminiClient, GeminiError
 from errgrind.llm.prompts import PromptManager
 
 
@@ -41,13 +56,142 @@ class PromptFormattingTests(unittest.TestCase):
                 "reference_answer": "a",
                 "grilling_history": "h",
             },
-            "drill.md": {"summary_list": "s"},
-            "judge.md": {"question": "q", "reference_answer": "a", "user_response": "r"},
+            "drill_spec.md": {"error_context": "s"},
+            "drill.md": {"drill_spec": "s"},
+            "judge.md": {
+                "question": "q",
+                "reference_answer": "a",
+                "user_response": "r",
+                "target_pattern": "p",
+                "success_signal": "s",
+            },
         }
 
         for name, substitutions in values.items():
             with self.subTest(name=name):
                 prompts.load(name).format(**substitutions)
+
+
+class JsonRetryTests(unittest.TestCase):
+    def test_openai_compatible_client_retries_invalid_json(self):
+        client = object.__new__(LLMClient)
+        client.max_retries = 2
+        client.chat = Mock(side_effect=["not json", '{"ok": true}'])
+
+        result = client.chat_json([{"role": "user", "content": "prompt"}])
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(client.chat.call_count, 2)
+        self.assertEqual(client.chat.call_args.kwargs["temperature"], 0.2)
+        retry_messages = client.chat.call_args.args[0]
+        self.assertIn("上次响应不是合法 JSON 对象", retry_messages[-1]["content"])
+
+    def test_openai_compatible_client_retries_non_text_response(self):
+        client = object.__new__(LLMClient)
+        client.max_retries = 2
+        client.chat = Mock(side_effect=[None, '{"ok": true}'])
+
+        result = client.chat_json([{"role": "user", "content": "prompt"}])
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(client.chat.call_count, 2)
+        self.assertEqual(client.chat.call_args.kwargs["temperature"], 0.2)
+
+    def test_gemini_client_retries_invalid_json(self):
+        client = GeminiClient(api_key="test-key", model="test-model", max_retries=2)
+        client.chat = Mock(side_effect=["[]", '{"ok": true}'])
+
+        result = client.chat_json([{"role": "user", "content": "prompt"}])
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(client.chat.call_count, 2)
+        self.assertEqual(
+            client.chat.call_args.kwargs["generationConfig"]["temperature"],
+            0.2,
+        )
+
+    def test_gemini_client_retries_non_text_response(self):
+        client = GeminiClient(api_key="test-key", model="test-model", max_retries=2)
+        client.chat = Mock(side_effect=[None, '{"ok": true}'])
+
+        result = client.chat_json([{"role": "user", "content": "prompt"}])
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(client.chat.call_count, 2)
+        self.assertEqual(
+            client.chat.call_args.kwargs["generationConfig"]["temperature"],
+            0.2,
+        )
+
+
+class MarkdownRenderingTests(unittest.TestCase):
+    def test_markdown_is_converted_to_prompt_toolkit_fragments(self):
+        fragments = render_markdown_to_formatted_text("# 题目\n\n这是 **重点**。")
+
+        self.assertIn(("bold underline", "题"), fragments)
+        self.assertIn(("bold", "重"), fragments)
+        self.assertNotIn(("", "#"), fragments)
+
+    def test_latex_math_is_made_terminal_readable(self):
+        rendered = _format_math_for_terminal(
+            r"已知 $\frac{1 - \cos 40°}{\sin 40°} = \tan \theta$，求 $\theta$。"
+        )
+
+        self.assertEqual(
+            rendered,
+            "已知 (1 - cos 40°) / (sin 40°) = tan θ，求 θ。",
+        )
+
+    def test_known_teach_formula_renders_without_latex_source(self):
+        source = (
+            r"**观察目标与已知：** 我们要凑出 $\tan 55^\circ$。"
+            r"而 $55^\circ$ 和 $20^\circ$ 相差 $35^\circ$。"
+        )
+
+        rendered = render_terminal_markdown(source)
+        plain = render_markdown_to_plain_text(source)
+
+        self.assertEqual(
+            rendered.markup,
+            "**观察目标与已知：** 我们要凑出 tan 55°。而 55° 和 20° 相差 35°。",
+        )
+        self.assertEqual(
+            plain,
+            "观察目标与已知： 我们要凑出 tan 55°。而 55° 和 20° 相差 35°。",
+        )
+
+    def test_display_math_and_common_symbols_are_readable(self):
+        rendered = _format_math_for_terminal(
+            r"\[x_{1,2}=\frac{-b\pm\sqrt{b^2-4ac}}{2a}\]"
+        )
+
+        self.assertEqual(rendered, "x₁,₂=(-b±√(b²-4ac)) / (2a)")
+
+    def test_markdown_code_is_not_treated_as_math(self):
+        source = "`$HOME`\n\n```text\n$5 + $6\n```"
+        self.assertEqual(_format_math_for_terminal(source), source)
+
+    def test_error_workspace_detail_uses_the_shared_renderer(self):
+        now = datetime(2026, 7, 27, 12, 0)
+        error = SimpleNamespace(
+            status="pending-teach",
+            question="# 题目\n求 " + r"$\tan 55^\circ$",
+            user_thoughts="我忽略了 **余角**。",
+            reference_answer=r"令 $x_1=35^\circ$。",
+            grilling_summary=r"需要先检查 $a \leq b$。",
+            grilling_conversation="[]",
+            created_at=now,
+        )
+
+        fragments = render_error_detail(error, 1)
+        text = "".join(fragment[1] for fragment in fragments)
+
+        self.assertIn("tan 55°", text)
+        self.assertIn("x₁=35°", text)
+        self.assertIn("a ≤ b", text)
+        self.assertNotIn("\\tan", text)
+        self.assertNotIn("$", text)
+        self.assertNotIn("**", text)
 
 
 class GrillingCompletionTests(unittest.TestCase):
@@ -90,6 +234,86 @@ class StreamingTests(unittest.TestCase):
 
         self.assertEqual(received, ["部分回答"])
         self.assertEqual(completions.calls, 1)
+
+
+class _GeminiStreamResponse:
+    def __init__(self, lines):
+        self.lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_lines(self):
+        yield from self.lines
+
+
+class GeminiStreamingTests(unittest.TestCase):
+    def _client(self):
+        return GeminiClient(api_key="test-key", model="test-model", max_retries=2)
+
+    def test_streaming_forwards_sse_text_chunks(self):
+        first = json.dumps({"candidates": [{"content": {"parts": [{"text": "你"}]}}]})
+        second = json.dumps({"candidates": [{"content": {"parts": [{"text": "好"}]}}]})
+        metadata = json.dumps({"usageMetadata": {"totalTokenCount": 2}})
+        response = _GeminiStreamResponse([
+            f"data: {first}", "", f"data: {second}", "", f"data: {metadata}", "",
+        ])
+        received = []
+
+        with patch("errgrind.llm.gemini.httpx.stream", return_value=response) as stream:
+            text = self._client().stream_chat(
+                [{"role": "system", "content": "prompt"}, {"role": "user", "content": "hi"}],
+                received.append,
+            )
+
+        self.assertEqual(text, "你好")
+        self.assertEqual(received, ["你", "好"])
+        self.assertEqual(stream.call_args.kwargs["params"]["alt"], "sse")
+        self.assertEqual(stream.call_args.kwargs["json"]["system_instruction"]["parts"][0]["text"], "prompt")
+
+    def test_streaming_does_not_retry_after_partial_output(self):
+        chunk = json.dumps({"candidates": [{"content": {"parts": [{"text": "部分"}]}}]})
+
+        class InterruptedResponse(_GeminiStreamResponse):
+            def iter_lines(self):
+                yield f"data: {chunk}"
+                yield ""
+                raise RuntimeError("connection lost")
+
+        received = []
+        with patch(
+            "errgrind.llm.gemini.httpx.stream",
+            return_value=InterruptedResponse([]),
+        ) as stream:
+            with self.assertRaises(GeminiError):
+                self._client().stream_chat([], received.append)
+
+        self.assertEqual(received, ["部分"])
+        self.assertEqual(stream.call_count, 1)
+
+
+class DatabasePathTests(unittest.TestCase):
+    def test_legacy_database_is_copied_once_and_preserved(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            legacy = root / "legacy.db"
+            data_dir = root / "new-data"
+            legacy.write_bytes(b"old database")
+
+            target = Path(prepare_database_path(str(data_dir), str(legacy)))
+
+            self.assertEqual(target.read_bytes(), b"old database")
+            self.assertTrue(legacy.exists())
+
+            target.write_bytes(b"new database")
+            prepare_database_path(str(data_dir), str(legacy))
+            self.assertEqual(target.read_bytes(), b"new database")
 
 
 if __name__ == "__main__":

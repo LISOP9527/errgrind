@@ -64,6 +64,8 @@ Policy 决定 **做什么（What）**。
 
 LLM 更负责 **如何做好（How）**。
 
+LLM 不应该替代 Policy 决定系统状态转换。
+
 ---
 
 ## Action（干预）
@@ -81,40 +83,3 @@ Action 是真正作用于用户的行为。
 Action 只是实现方式。
 
 未来可能继续增加新的 Action，但整个系统不应该围绕某几个 Action 设计，而应该围绕 State 和 Policy 设计。
-
----
-
-# 核心原则
-
-Error 的价值，在于它暴露了 Pattern。
-
-Pattern 的价值，在于它能够预测未来的 Error。
-
-State 的价值，在于保存这些 Pattern。
-
-Policy 的价值，在于决定最有效的下一步。
-
-Action 的价值，在于真正减少未来的 Error。
-
-因此：
-
-> **ErrGrind 并不是在分析 Error，而是在利用 Error 建立用户模型，并利用这个模型帮助用户减少未来的 Error。**
-
-以后所有新增功能，都应该回答一个问题：
-
-> **它是否能够帮助系统减少未来的 Error？**
-
-如果不能，那么即使它很有趣，也不应该优先实现。
-
-# 架构解耦原则（TUI → GUI / Mobile）
-
-为了保证从 TUI 平滑演进到 GUI 及 Mobile App，须遵循以下原则：
-
-1. **Headless Engine（核心与 UI 解耦）**：Core Engine 纯粹负责逻辑（State 建模、Policy 决策、Action 触发），UI 仅作为渲染壳。
-2. **结构化数据传递**：Engine 与 UI 之间只传递结构化数据（JSON/对象），禁止在 Core 逻辑中硬编码终端排版或颜色代码。
-3. **标准数据协议**：文本与公式统一使用标准 Markdown + LaTeX 输出，确保跨平台（TUI / Web GUI / Mobile）无缝复用渲染。
-
-# 一些待考虑的问题
-
-- mvp做完后，是否fork一个agent？
-- 是否考虑做成某个agent的插件？

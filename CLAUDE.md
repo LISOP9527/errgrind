@@ -1,22 +1,29 @@
 # ErrGrind 设计原则
 
+## 设计记录约定
+
+- 设计和决策统一记录在 `design/` 目录，并从 `design/README.md` 建索引，方便后续 review。
+- 稳定的系统设计写入对应主题文件，例如架构、原则、数据流、UI 解耦等。
+- 具体决策及其背景写入 `design/decisions/`，记录 Context、Decision、Rationale、Consequences。
+- 后续 vibe coding 过程中，如果用户提出新的设计或决策，需要同步更新相关设计文件和索引。
+
 ## 项目目标（Vision）
 
 ErrGrind 不是一个 AI 错题本。
 
 它的目标是：
 
-> **通过 Error 建立用户的 Thinking Model（认知模型），并利用这个 Model 持续帮助用户优化，从而减少未来的 Error。**
+> 通过用户使用过程中的 Evidence 建立用户的 Thinking Model（认知模型），识别可能导致未来 Error 的 Pattern，并利用这个 Model 持续帮助用户优化，从而减少未来的 Error。
 
 项目关注的不是某一道题为什么做错，而是：
 
 1. 用户有哪些稳定的思维模式（Pattern）？
-2. 哪些 Pattern 会持续导致 Error？
-3. 如何利用这些 Pattern 帮助用户减少未来的 Error？
+2. 哪些 Pattern 可能导致未来 Error？
+3. 如何利用这些 Pattern 设计有效的 Action，帮助用户减少未来 Error？
 
-因此，ErrGrind 的核心目标不是**解释错误（Explain Error）**，而是**减少未来错误（Reduce Future Error）**。
+因此，ErrGrind 的核心目标不是解释错误（Explain Error），而是优化用户的思考过程（Optimize Thinking Process），最终减少未来错误（Reduce Future Error）。
 
-解释只是过程，不是目的。
+解释 Error 是发现 Pattern 的重要方式，但不是最终目的。
 
 ---
 
@@ -91,14 +98,15 @@ pending-grill → pending-teach → done
 - `pending-teach`：已完成 grilling，等待 teach
 - `done`：grilling + teach 全部完成
 
-re-grill 任何状态 = 继续已有对话 → 状态 `pending-teach` + 清空 teach/summary
-re-teach 任何状态 = 覆盖旧 teach，fresh 上下文 → 状态 `done`
-teach 在 `pending-grill`（无 grilling 对话）时禁止
+完成后的 grill 为只读记录；再次按 `g` 只查看记录，不继续对话
+partial grill（Ctrl+C、轮数上限或 API 错误）保持 `pending-grill`，再次按 `g` 继续
+teach 使用同一段持久对话；Ctrl+C 保存退出并进入 `done`，之后按 `t` 可继续
+teach 在 `pending-grill`（包括已有 partial grilling 对话）时禁止
 
 ### 中断处理
 
 - grilling 中 Ctrl+C → 保存 partial 对话 + 状态回退 `pending-grill`，下次继续
-- teach 中 Ctrl+C → 保存 partial teach 对话 + 状态不变，下次继续
+- teach 中 Ctrl+C → 保存对话 + 状态 `done`，下次可继续
 
 ---
 
@@ -108,7 +116,7 @@ teach 在 `pending-grill`（无 grilling 对话）时禁止
 - SQLite（内置 sqlite3，无 ORM）
 - prompt_toolkit（多行输入、快捷键、列表选择）
 - Gemini API + DeepSeek API（OpenAI 兼容接口）+ OpenCode Go（OpenAI 兼容接口）
-- httpx（HTTP 请求，已通过 openai 依赖引入）
+- httpx（HTTP 请求，项目直接依赖）
 
 ## 目录结构
 ```
@@ -131,13 +139,17 @@ errgrind/
 │   ├── config.py              # ~/.config/errgrind/config.json 读写
 │   ├── __main__.py            # python -m errgrind 支持
 │   └── main.py                # 入口
-├── data/                      # SQLite 数据库文件
+├── data/                      # 旧版 SQLite 数据库位置，仅用于首次迁移
+├── design/                    # 长期设计、原则与关键决策记录
 ├── prompts/                   # prompt 模板文件
 │   ├── grilling.md            # Socratic 审讯系统 prompt（针对数学，[GRILLING_END] 结束标记）
 │   ├── teach.md               # 讲解 + Q&A 系统 prompt（针对数学）
 │   ├── drill.md               # 出综合题 prompt（开放题，{summary_list}）
 │   └── judge.md               # LLM 判对错 prompt
+├── tests/                     # 离线自动化回归测试
+├── install.sh                 # 本地安装脚本
 ├── pyproject.toml
+├── todo.md                    # 当前实现进度与验证记录
 └── CLAUDE.md
 ```
 
@@ -145,14 +157,14 @@ errgrind/
 
 ### `/record`
 1. 用户输入题目（多行）
-2. 用户输入思路概述（多行，可空）
+2. 用户输入思路概述（多行，必填；确实没有思路时填写「没有思路」）
 3. 用户输入参考答案及解析（多行，可空）
 4. 入库，状态 = `pending-grill`
 
 ### `/resume`
 1. 打开全屏双栏工作台：左侧为 error 列表，右侧为当前 error 的摘要、思路与 grilling 摘要
 2. 方向键浏览；Enter 对 `pending-grill` 默认开始 grill，对其他状态默认开始 teach
-3. 按 `g` 开始/继续 grilling，按 `t` 开始/继续 teach，按 `d` 删除当前 error（需确认），按 `q`/Esc 返回
+3. 按 `g` 开始/继续 partial grilling；grill 完成后按 `g` 只查看记录；按 `t` 开始/继续 teach，按 `d` 删除当前 error（需确认），按 `q`/Esc 返回
 4. grilling/teach/删除完成后返回并刷新工作台
 
 ### `/drill`
@@ -195,14 +207,14 @@ CREATE TABLE error_records (
 
 ## 运行命令
 - `errgrind` — 启动交互式 CLI
-- 需 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 或 OPENCODE_API_KEY，首次启动有配置向导
+- 首次启动通过配置向导填写 provider、API key 和 model，并保存到 `~/.config/errgrind/config.json`
 - 启动后提示「可通过 /help 查看命令」
 
 ## 配置（`~/.config/errgrind/config.json`）
 ```json
 {
   "provider": "gemini",
-  "model": "gemini-3.5-flash",
+  "model": "gemini-3.6-flash",
   "api_key": "...",
   "drill_context_n": 10,
   "grill_max_turns": 30
@@ -220,13 +232,13 @@ errgrind
 ```
 
 ## 已知问题
-- Gemini 免费模型 `gemini-3.5-flash` 经常返回 503（高负载），`gemini-3.1-flash-lite` 更稳定
+- 2026-07-27 使用项目配置的免费 API 实测：`gemini-3.6-flash`、`gemini-3.5-flash-lite` 等模型均可用；当前默认推荐 `gemini-3.6-flash`
 - Gemini API 需要一个 dummy user message（`"开始吧"`）来满足 `contents` 非空要求
 - Gemini 用 `system_instruction` 字段传系统 prompt，不能放在 `contents` 数组里（已在 `gemini.py` 处理）
 - 多行输入用 prompt_toolkit：Enter 提交，Alt+Enter 换行
-- 数据库文件自动创建在 `data/errgrind.db`
+- 数据库文件自动创建在 `~/.local/share/errgrind/errgrind.db`（设置 `XDG_DATA_HOME` 时遵循该目录）；首次使用新路径时会复制旧的 `data/errgrind.db`，旧文件保留
 - grilling 第一次回复就含 `[GRILLING_END]` 是允许的（AI 判断题目简单）
-- grilling/teach 中 Ctrl+C 会被捕获并保存 partial 进度
+- grilling 中 Ctrl+C 会保存 partial 进度；teach 中 Ctrl+C 会保存退出，之后可继续进入
 
 ## 快速验证
 ```bash
@@ -243,13 +255,13 @@ errgrind
 
 ## 自动化回归测试
 
-轻量离线测试用于防止状态流转、prompt 格式化和 `/drill` 分支回归；不调用真实 API，也不评估产品是否真正减少未来 Error。后者以实际使用和长期观察为准。
+轻量离线测试用于防止 prompt 格式化、终端渲染、数据迁移、状态流转、会话生命周期、流式输出和 `/drill` 分支回归；不调用真实 API，也不评估产品是否真正减少未来 Error。后者以实际使用和长期观察为准。
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-当前测试覆盖：prompt 模板格式化、Grill 结束标记、流式输出重试、Error 状态机、删除，以及 `/drill` 答对/答错分支。
+当前 25 项测试覆盖：prompt 模板格式化、Markdown / LaTeX 终端渲染、Grill 结束标记、OpenAI 兼容接口与 Gemini SSE 流式输出、数据库路径迁移、Error 状态机、删除、`/record` 必填思路、Grill / Teach 会话恢复，以及 `/drill` 答对/答错分支。
 
 ---
 

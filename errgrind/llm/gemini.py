@@ -1,9 +1,12 @@
 import os
 import json
 import time
+from collections.abc import Callable
 from typing import Optional
 
 import httpx
+
+from ..config import DEFAULT_GEMINI_MODEL
 
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -24,11 +27,12 @@ class GeminiClient:
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if not self.api_key:
             raise GeminiError("GEMINI_API_KEY 未设置")
-        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+        self.model = model or os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         self.max_retries = max_retries
         self.timeout = timeout
 
-    def chat(self, messages: list[dict], **kwargs) -> str:
+    @staticmethod
+    def _request_body(messages: list[dict], kwargs: dict) -> dict:
         system_instruction = None
         contents = []
         for m in messages:
@@ -44,6 +48,26 @@ class GeminiClient:
             body["system_instruction"] = system_instruction
         body["contents"] = contents
         body.update(kwargs)
+        return body
+
+    @staticmethod
+    def _response_text(data: dict) -> str:
+        try:
+            parts = data["candidates"][0]["content"]["parts"]
+            return "".join(part.get("text", "") for part in parts)
+        except (KeyError, IndexError, TypeError) as e:
+            raise GeminiError(f"Gemini API 响应中没有文本: {data}") from e
+
+    @staticmethod
+    def _stream_response_text(data: dict) -> str:
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(part.get("text", "") for part in parts)
+
+    def chat(self, messages: list[dict], **kwargs) -> str:
+        body = self._request_body(messages, kwargs)
 
         url = f"{GEMINI_BASE}/{self.model}:generateContent"
 
@@ -56,8 +80,7 @@ class GeminiClient:
                     timeout=self.timeout,
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                return self._response_text(resp.json())
             except Exception as e:
                 if attempt < self.max_retries - 1:
                     time.sleep(2 ** attempt)
@@ -66,12 +89,88 @@ class GeminiClient:
                     detail_text = detail.text if detail is not None else str(e)
                     raise GeminiError(f"Gemini API 调用失败: {detail_text[:500]}")
 
+    def stream_chat(
+        self,
+        messages: list[dict],
+        on_token: Callable[[str], None],
+        **kwargs,
+    ) -> str:
+        body = self._request_body(messages, kwargs)
+        url = f"{GEMINI_BASE}/{self.model}:streamGenerateContent"
+
+        for attempt in range(self.max_retries):
+            collected = []
+            try:
+                with httpx.stream(
+                    "POST",
+                    url,
+                    params={"key": self.api_key, "alt": "sse"},
+                    json=body,
+                    timeout=self.timeout,
+                ) as resp:
+                    resp.raise_for_status()
+                    event_data = []
+                    for line in resp.iter_lines():
+                        if not line:
+                            if event_data:
+                                token = self._stream_response_text(json.loads("\n".join(event_data)))
+                                if token:
+                                    collected.append(token)
+                                    on_token(token)
+                                event_data = []
+                            continue
+                        if line.startswith("data:"):
+                            event_data.append(line[5:].lstrip())
+                    if event_data:
+                        token = self._stream_response_text(json.loads("\n".join(event_data)))
+                        if token:
+                            collected.append(token)
+                            on_token(token)
+                if not collected:
+                    raise GeminiError("Gemini 流式 API 响应中没有文本")
+                return "".join(collected)
+            except Exception as e:
+                if collected:
+                    raise GeminiError(f"Gemini 流式 API 调用中断: {e}") from e
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    raise GeminiError(f"Gemini API 调用失败: {e}") from e
+
     def chat_json(self, messages: list[dict], **kwargs) -> dict:
-        config = kwargs.pop("generation_config", {})
+        config = dict(kwargs.pop("generation_config", {}))
         config["response_mime_type"] = "application/json"
-        text = self.chat(messages, generationConfig=config, **kwargs)
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as e:
-            raise GeminiError(f"JSON 解析失败: {e}\n原始响应: {text}")
+        config.setdefault("temperature", 0.2)
+        retry_messages = list(messages)
+        last_error = None
+        last_text = ""
+        for attempt in range(self.max_retries):
+            last_text = self.chat(retry_messages, generationConfig=config, **kwargs)
+            try:
+                if not isinstance(last_text, str):
+                    raise TypeError("响应内容必须是文本")
+                cleaned = last_text.strip().removeprefix("```json").removeprefix("```")
+                cleaned = cleaned.removesuffix("```")
+                result = json.loads(cleaned)
+                if not isinstance(result, dict):
+                    raise ValueError("顶层必须是 JSON 对象")
+                return result
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    retry_messages = [
+                        *messages,
+                        {
+                            "role": "assistant",
+                            "content": (
+                                last_text
+                                if isinstance(last_text, str)
+                                else repr(last_text)
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": "上次响应不是合法 JSON 对象。只重新输出完整 JSON，不要使用 Markdown 代码块。",
+                        },
+                    ]
+        raise GeminiError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")

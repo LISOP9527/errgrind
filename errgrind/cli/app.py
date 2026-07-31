@@ -4,7 +4,7 @@ import httpx
 from rich.columns import Columns
 from rich.panel import Panel
 
-from ..config import load as load_config, save as save_config
+from ..config import DEFAULT_GEMINI_MODEL, load as load_config, save as save_config
 from ..db.ops import Database
 from ..llm.client import DEEPSEEK_BASE_URL, GO_BASE_URL, LLMClient, LLMError
 from ..llm.gemini import GeminiClient, GeminiError
@@ -56,7 +56,7 @@ def _select_model(cfg):
     default_model = ""
     if provider == "gemini":
         models = _fetch_gemini_models(cfg["api_key"])
-        default_model = "gemini-3.5-flash"
+        default_model = DEFAULT_GEMINI_MODEL
     elif provider == "deepseek":
         models = _fetch_llm_models(DEEPSEEK_BASE_URL, cfg["api_key"])
         default_model = "deepseek-chat"
@@ -67,7 +67,14 @@ def _select_model(cfg):
         default_model = "deepseek-v4-flash"
 
     if models:
-        idx = select_from_list(models, lambda m: m, title="选择 AI 模型")
+        if default_model in models:
+            models.remove(default_model)
+            models.insert(0, default_model)
+        idx = select_from_list(
+            models,
+            lambda m: f"{m}（推荐）" if m == default_model else m,
+            title="选择 AI 模型",
+        )
         if idx is None:
             raise KeyboardInterrupt
         cfg["model"] = models[idx]
@@ -106,7 +113,7 @@ def _make_llm(cfg):
     api_key = cfg["api_key"]
 
     if provider == "gemini":
-        return info[1](api_key=api_key, model=cfg.get("model", "gemini-3.5-flash"))
+        return info[1](api_key=api_key, model=cfg.get("model", DEFAULT_GEMINI_MODEL))
     if provider == "opencode":
         return info[1](
             api_key=api_key,
