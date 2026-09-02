@@ -16,7 +16,7 @@
 
 ```text
 .venv/bin/python -m unittest discover -s tests -v
-Ran 60 tests ... OK
+Ran 61 tests ... OK
 ```
 
 真实验证使用已登录的 Codex `gpt-5.6-sol` 和隔离数据库

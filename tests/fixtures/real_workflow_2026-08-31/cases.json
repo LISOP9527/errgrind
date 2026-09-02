@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-08-31",
+  "source": {
+    "provider": "codex",
+    "model": "gpt-5.6-sol",
+    "real_api": true,
+    "isolated_database": true,
+    "contains_user_data": false
+  },
+  "cases": [
+    {
+      "fixture_id": "percentage-changing-baseline",
+      "difficulty": 1,
+      "topic": "百分比与变化基准",
+      "capture_method": "direct_record",
+      "review_targets": [
+        "把相同数值且方向相反的百分比变化机械视为可抵消",
+        "没有确认第二次百分比所依据的基准已经改变",
+        "表面对称带来过早停止检查"
+      ],
+      "snapshot_record_id": 2,
+      "input": {
+        "question": "一件商品原价 500 元，先降价 20%，随后又按降价后的价格上涨 20%。最终价格是多少？是否回到原价？",
+        "user_thoughts": "我看到先减 20% 再加 20%，觉得两个相反的 20% 会抵消，所以没展开算，直接写最终还是 500 元。",
+        "reference_answer": "降价后为 500×0.8=400 元，再上涨后为 400×1.2=480 元，没有回到原价。"
+      },
+      "scripted_grill_answers": [
+        "我当时默认两个百分比都以原价 500 为基准，因为数字一样而且一减一加，看起来很对称。",
+        "我没有停下来确认第二个 20% 的基数；看到相反操作后就直接把它们配成逆运算了。"
+      ],
+      "review_expectations": {
+        "after_grill": "pending-teach",
+        "after_teach": "done",
+        "must_not_reduce_to": [
+          "粗心",
+          "不会",
+          "计算错"
+        ],
+        "snapshot_summary": "本次的 Error Pattern 是：看到数值相同、方向相反的操作时，便机械地视为可抵消的逆运算，因而跳过了对每一步适用基准的确认。这种表面对称引发的推理跳跃，容易使条件中基准已变化的信息被忽略。"
+      }
+    },
+    {
+      "fixture_id": "radical-equation-extraneous-root",
+      "difficulty": 2,
+      "topic": "根式方程与非等价变形",
+      "capture_method": "ocr_reviewed",
+      "review_targets": [
+        "把平方默认当作双向等价变形",
+        "把整齐的整数根当成正确性证据",
+        "依赖外部提醒才验根或检查符号条件"
+      ],
+      "snapshot_record_id": 1,
+      "input": {
+        "question": "在实数范围内解方程 $\\sqrt{x+1}=x-1$。",
+        "user_thoughts": "两边平方得到 $x+1=(x-1)^2$，整理为 $x^2-3x=0$，所以 $x=0$ 或 $x=3$。我觉得方程变形得到的两个根都应该保留。",
+        "reference_answer": "平方前要求 $x-1\\ge0$。平方后候选为 0、3，代回原方程只有 $x=3$ 成立。"
+      },
+      "scripted_grill_answers": [
+        "我把平方看成普通的等式变形，觉得从原方程推出来的二次方程和原方程应当完全等价。",
+        "我其实知道平方有时会出现增根，但只在老师或题目特别提醒验根时才会想到；这次根是整齐的 0 和 3，就更像都对。",
+        "因式分解得到漂亮整数根时，我会把这种整齐感当成正确性的证据，于是停止检查原方程的符号条件。"
+      ],
+      "review_expectations": {
+        "after_grill": "pending-teach",
+        "after_teach": "done",
+        "must_not_reduce_to": [
+          "粗心",
+          "不会",
+          "计算错"
+        ],
+        "snapshot_summary": "本次的 Error Pattern 是：把结果整齐、计算顺利当作正确性证据，从而将可能不等价的变形默认视为等价，并停止检查条件。依赖外部提醒才启动验证，会使这一错误在类似题目中反复出现。"
+      }
+    },
+    {
+      "fixture_id": "conditional-probability-sample-space",
+      "difficulty": 3,
+      "topic": "条件概率与样本空间",
+      "capture_method": "direct_record",
+      "review_targets": [
+        "把至少一个满足条件擅自具体化为固定位置满足条件",
+        "为了套用熟悉模型而缩窄条件样本空间",
+        "没有检查重叠结果和条件后的等可能性"
+      ],
+      "snapshot_record_id": 3,
+      "input": {
+        "question": "掷两枚可区分的公平六面骰子。已知至少有一枚骰子点数为 6，求两枚点数之和为 8 的条件概率。",
+        "user_thoughts": "既然已经知道有一枚是 6，我就把它固定住，只看另一枚骰子；另一枚掷出 2 的概率是 1/6，所以答案是 1/6。",
+        "reference_answer": "条件样本空间有 11 个等可能有序结果：(6,1)…(6,6) 以及 (1,6)…(5,6)。其中和为 8 的有 (6,2)、(2,6)，故概率为 2/11。"
+      },
+      "scripted_grill_answers": [
+        "我脑中把“至少一枚是 6”直接具体化成了“第一枚已经确定是 6”，虽然题目没有说是哪一枚。",
+        "我没有列条件后的所有有序结果，也没注意到 (6,6) 在两个方向里会重叠；固定一个位置只是为了让问题变成熟悉的一次掷骰。",
+        "遇到“至少一个存在”的条件时，我常把未知的位置替换成一个固定位置，好像这样不会改变概率。"
+      ],
+      "review_expectations": {
+        "after_grill": "pending-teach",
+        "after_teach": "done",
+        "must_not_reduce_to": [
+          "粗心",
+          "不会",
+          "计算错"
+        ],
+        "snapshot_summary": "发现的 Error Pattern 是：遇到“至少一个满足条件”时，会把未确定的位置直接固定为某个位置，以便套用熟悉模型，却不检查这种改写是否改变了原条件的结果范围。这会稳定地造成条件样本空间被缩窄或扭曲。"
+      }
+    },
+    {
+      "fixture_id": "nondifferentiable-critical-point",
+      "difficulty": 4,
+      "topic": "导数与局部极值",
+      "capture_method": "direct_record",
+      "review_targets": [
+        "把临界点错误地等同于导数为零的点",
+        "把导数公式无定义当成排除候选点的理由",
+        "机械执行算法清单后没有回到原函数检查"
+      ],
+      "snapshot_record_id": 4,
+      "input": {
+        "question": "求函数 $f(x)=x^{2/3}(x-1)$ 的所有局部极值点。",
+        "user_thoughts": "我求导得到 $f'(x)=\\frac{5x-2}{3x^{1/3}}$，令导数等于 0 得 $x=2/5$。在 $x=0$ 导数不存在，所以它不满足 $f'(x)=0$，我就把它排除了，只写了 $x=2/5$。",
+        "reference_answer": "临界点包括导数为 0 或导数不存在但函数有定义的点。符号分析得 x=0 为局部极大点，x=2/5 为局部极小点。"
+      },
+      "scripted_grill_answers": [
+        "我记忆里的步骤就是“求导、令导数为零”，所以把临界点和导数零点当成了同一个集合。",
+        "看到导数在 0 不存在时，我把它理解成这个点不能参与导数法，而不是需要另外检查函数在这里的行为。",
+        "我依赖算法给出的候选点清单；一旦某点让公式无定义，我倾向于删除它，而不是回到原函数左右比较。"
+      ],
+      "review_expectations": {
+        "after_grill": "pending-teach",
+        "after_teach": "done",
+        "must_not_reduce_to": [
+          "粗心",
+          "不会",
+          "计算错"
+        ],
+        "snapshot_summary": "本次的 Error Pattern 是机械依赖固定算法，把公式无定义误当作候选点的排除条件，并在算法清单生成后停止检查。这会导致凡是超出熟悉操作流程、需要回到原对象判断的情况被系统性遗漏。"
+      }
+    },
+    {
+      "fixture_id": "reversing-ratio-test",
+      "difficulty": 5,
+      "topic": "级数判别法与逻辑方向",
+      "capture_method": "direct_record",
+      "review_targets": [
+        "把充分条件反向当作必要条件",
+        "受几何级数这一典型例子影响而过度概括",
+        "识别出熟悉定理后没有测试反例或确认箭头方向"
+      ],
+      "snapshot_record_id": 5,
+      "input": {
+        "question": "判断命题真伪并证明：对任意正项级数 $\\sum a_n$，如果它收敛，那么必有 $\\lim_{n\\to\\infty} a_{n+1}/a_n<1$。",
+        "user_thoughts": "我记得比值判别法说比值极限小于 1 时级数收敛。题目已经说级数收敛，所以我反过来认为它的比值极限一定小于 1，判定命题为真。",
+        "reference_answer": "命题为假。取 $a_n=1/n^2$，级数收敛，但 $a_{n+1}/a_n=n^2/(n+1)^2\\to1$。比值判别法给的是充分条件，不是必要条件。"
+      },
+      "scripted_grill_answers": [
+        "我在记忆中把“比值小于 1”和“收敛”强绑定了，没明确保存定理只有一个方向。",
+        "收敛在我脑中主要对应几何级数那种指数衰减，所以觉得所有收敛正项级数都应有固定比例缩小。",
+        "我没有尝试多项式衰减的例子；看到题目使用熟悉判别法的结论，就直接把箭头反了。"
+      ],
+      "review_expectations": {
+        "after_grill": "pending-teach",
+        "after_teach": "done",
+        "must_not_reduce_to": [
+          "粗心",
+          "不会",
+          "计算错"
+        ],
+        "snapshot_summary": "本次的 Error Pattern 是：把定理中的条件与结论强关联后，受典型例子影响直接反转推理方向，并在识别出熟悉结论后停止验证。这会使单向规则被机械地当作双向等价关系。"
+      }
+    }
+  ]
+}
