@@ -117,21 +117,17 @@ class DatabaseWorkflowTests(unittest.TestCase):
         self.db.update_grilling(source, "[]", "摘要")
         result = self.db.record_drill_attempt(
             source,
-            '{"target_pattern": {}}',
+            {"target_pattern": {}},
             "衍生题",
             "参考答案",
             "我的回答",
             False,
             "请检查条件",
-            {
-                "question": "衍生题",
-                "user_thoughts": "我的回答",
-                "reference_answer": "参考答案",
-            },
         )
         attempt = self.db.list_drill_attempts()[0]
         self.assertEqual(attempt.id, result.attempt_id)
         self.assertEqual(attempt.derived_error_id, result.derived_error_id)
+        self.assertEqual(attempt.drill_spec, {"target_pattern": {}})
         self.assertFalse(attempt.is_correct)
         child = self.db.get_error(attempt.derived_error_id)
         self.assertEqual(child.origin, "drill")
@@ -141,7 +137,7 @@ class DatabaseWorkflowTests(unittest.TestCase):
     def test_correct_drill_attempt_has_no_derived_error(self):
         source = self.db.create_error("原题")
         result = self.db.record_drill_attempt(
-            source, "{}", "题", "答", "作答", True, "正确"
+            source, {}, "题", "答", "作答", True, "正确"
         )
         attempt = self.db.list_drill_attempts()[0]
         self.assertEqual(attempt.id, result.attempt_id)
@@ -152,23 +148,28 @@ class DatabaseWorkflowTests(unittest.TestCase):
             {"total": 1, "correct": 1, "incorrect": 0},
         )
 
+    def test_drill_attempt_rejects_unstructured_spec(self):
+        source = self.db.create_error("原题")
+
+        with self.assertRaisesRegex(ValueError, "drill_spec 必须是 JSON 对象"):
+            self.db.record_drill_attempt(
+                source, "{}", "题", "答", "作答", True, "正确"
+            )
+
+        self.assertEqual(self.db.drill_stats()["total"], 0)
+
     def test_origin_counts_distinguish_user_and_drill_sources(self):
         record_source = self.db.create_error("手动题")
         self.db.create_error("OCR 题", origin="ocr")
         self.db.create_error("历史题", origin="unknown")
         self.db.record_drill_attempt(
             record_source,
-            "{}",
+            {},
             "衍生题",
             "答案",
             "错误作答",
             False,
             "反馈",
-            {
-                "question": "衍生题",
-                "user_thoughts": "错误作答",
-                "reference_answer": "答案",
-            },
         )
 
         self.assertEqual(
@@ -178,17 +179,22 @@ class DatabaseWorkflowTests(unittest.TestCase):
 
     def test_failed_derived_insert_rolls_back_attempt(self):
         source = self.db.create_error("原题")
+        self.db.conn.execute(
+            "CREATE TRIGGER reject_drill_error "
+            "BEFORE INSERT ON error_records "
+            "WHEN NEW.origin = 'drill' "
+            "BEGIN SELECT RAISE(ABORT, '模拟衍生 Error 写入失败'); END"
+        )
 
-        with self.assertRaises(KeyError):
+        with self.assertRaises(sqlite3.IntegrityError):
             self.db.record_drill_attempt(
                 source,
-                "{}",
+                {},
                 "衍生题",
                 "答案",
                 "错误作答",
                 False,
                 "反馈",
-                {"user_thoughts": "缺少 question"},
             )
 
         self.assertEqual(self.db.drill_stats()["total"], 0)
@@ -198,17 +204,12 @@ class DatabaseWorkflowTests(unittest.TestCase):
         source = self.db.create_error("原题")
         result = self.db.record_drill_attempt(
             source,
-            "{}",
+            {},
             "衍生",
             "答",
             "错",
             False,
             "反馈",
-            {
-                "question": "衍生",
-                "user_thoughts": "错",
-                "reference_answer": "答",
-            },
         )
         child = self.db.get_error(result.derived_error_id)
         self.db.delete_error(source)
@@ -221,17 +222,12 @@ class DatabaseWorkflowTests(unittest.TestCase):
         source = self.db.create_error("原题")
         result = self.db.record_drill_attempt(
             source,
-            "{}",
+            {},
             "衍生",
             "答",
             "错",
             False,
             "反馈",
-            {
-                "question": "衍生",
-                "user_thoughts": "错",
-                "reference_answer": "答",
-            },
         )
 
         self.db.delete_error(result.derived_error_id)

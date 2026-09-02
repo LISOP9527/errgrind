@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import os
 from datetime import datetime
@@ -141,21 +142,19 @@ class Database:
     def record_drill_attempt(
         self,
         source_error_id: int,
-        drill_spec: str,
+        drill_spec: dict,
         question: str,
         reference_answer: str,
         user_response: str,
         is_correct: bool,
         feedback: str,
-        derived_error: Optional[dict] = None,
     ) -> DrillAttemptResult:
-        """一次判分与可选衍生 Error 原子提交，避免只写半条闭环证据。"""
+        """原子保存一次判分；错误结果同时创建可追溯的衍生 Error。"""
         if not isinstance(is_correct, bool):
             raise ValueError("is_correct 必须是布尔值")
-        if is_correct and derived_error is not None:
-            raise ValueError("正确的 Drill 结果不能创建衍生 Error")
-        if not is_correct and derived_error is None:
-            raise ValueError("错误的 Drill 结果必须创建衍生 Error")
+        if not isinstance(drill_spec, dict):
+            raise ValueError("drill_spec 必须是 JSON 对象")
+        drill_spec_json = json.dumps(drill_spec, ensure_ascii=False)
 
         with self.conn:
             derived_id = None
@@ -166,7 +165,7 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
                 (
                     source_error_id,
-                    drill_spec,
+                    drill_spec_json,
                     question,
                     reference_answer,
                     user_response,
@@ -175,16 +174,16 @@ class Database:
                 ),
             )
             attempt_id = int(cur.lastrowid)
-            if derived_error is not None:
+            if not is_correct:
                 derived_id = self.conn.execute(
                     "INSERT INTO error_records "
                     "(question, user_thoughts, reference_answer, origin, "
                     "source_error_id, source_drill_attempt_id) "
                     "VALUES (?, ?, ?, 'drill', ?, ?)",
                     (
-                        derived_error["question"],
-                        derived_error.get("user_thoughts"),
-                        derived_error.get("reference_answer"),
+                        question,
+                        user_response,
+                        reference_answer,
                         source_error_id,
                         attempt_id,
                     ),
@@ -205,7 +204,7 @@ class Database:
             DrillAttempt(
                 id=row["id"],
                 source_error_id=row["source_error_id"],
-                drill_spec=row["drill_spec"],
+                drill_spec=json.loads(row["drill_spec"]),
                 question=row["question"],
                 reference_answer=row["reference_answer"],
                 user_response=row["user_response"],

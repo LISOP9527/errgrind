@@ -706,26 +706,16 @@ def _cmd_drill(state, arg):
     feedback = feedback.strip()
 
     source_error_id = context[source_index].error_id
-    spec_json = json.dumps(drill_spec, ensure_ascii=False)
-
-    derived_error = None
-    if not is_correct:
-        derived_error = {
-            "question": question,
-            "user_thoughts": user_response,
-            "reference_answer": reference_answer,
-        }
 
     try:
         attempt_result = state.db.record_drill_attempt(
             source_error_id,
-            spec_json,
+            drill_spec,
             question,
             reference_answer,
             user_response,
             is_correct,
             feedback,
-            derived_error=derived_error,
         )
     except Exception as error:
         errmsg(f"保存演练结果失败: {error}")

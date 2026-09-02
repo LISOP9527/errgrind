@@ -5,7 +5,7 @@
 - `error_records` 增加来源与结构化 source 字段；旧记录迁移为 `unknown`，record/OCR/Drill 衍生记录保留来源。
 - 新增 `drill_attempts` 原子账本，保存 source Error、完整 DrillSpec、作答、判分和衍生 Error。
 - 注意：Drill 正确率是干预记录，不是未来真实 Error 减少的证明；Pattern 一等实体仍待后续设计。
-- 验证：`PYTHONPATH=/root/errgrind-sol-lab /root/errgrind/.venv/bin/python -m unittest discover -s tests -v`，`Ran 70 tests ... OK`。
+- 验证：`PYTHONPATH=/root/errgrind-sol-lab /root/errgrind/.venv/bin/python -m unittest discover -s tests -v`，`Ran 71 tests ... OK`。
 
 ## 2026-08-31：OCR 录题与 Codex 真实全流程
 

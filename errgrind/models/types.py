@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -24,7 +24,7 @@ class ErrorRecord:
 class DrillAttempt:
     id: int
     source_error_id: int
-    drill_spec: str
+    drill_spec: dict[str, Any]
     question: str
     reference_answer: str
     user_response: str
