@@ -1,5 +1,10 @@
 # 当前进度与验证记录
 
+## 2026-09-02：暂缓 Pattern Observation 校验
+
+- 当前 MVP 继续直接使用 `grilling_summary` 表达本次 Grill 发现的 Pattern，不新增 Observation schema、Evidence quote 校验、持久化或 review 流程。
+- 结构化 Pattern Observation 保留为未来设计提案，只有用户再次确认进入该阶段后才实现。
+
 ## 2026-09-01：Judge provenance Schema v2
 
 - `drill_attempts` 保存 Judge provider/model、未 format Judge 模板 SHA-256 和 canonical Judge schema SHA-256；v1 旧 attempt 迁移为 `unknown`。

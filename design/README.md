@@ -19,6 +19,7 @@
 - [Codex provider 通过官方 app-server 接入](decisions/2026-08-29-codex-app-server-provider.md)：使用官方 SDK 管理 ChatGPT 登录和 token，ErrGrind 只保留 provider/model 配置。
 - [OCR 作为需人工校对的录题入口](decisions/2026-08-31-ocr-as-reviewed-input.md)：provider 负责图片转录，用户确认后的文本才进入现有 Error 工作流。
 - [Evidence 来源与 Drill Action Ledger](decisions/2026-09-01-evidence-provenance-drill-ledger.md)：记录 Error 来源、Drill 判分与衍生 Error 的可追溯关系。
+- [暂缓 Pattern Observation 校验](decisions/2026-09-02-defer-pattern-observation-validation.md)：当前 MVP 直接使用 `grilling_summary`，暂不引入结构化 Observation 与 Evidence 校验。
 
 ## 维护规则
 

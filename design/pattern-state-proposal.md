@@ -128,6 +128,10 @@ patterns
 
 已在 `2026-09-01-evidence-provenance-drill-ledger` 决策中实现。它解决数据是否来自真实 Error、OCR 还是 Drill，以及 Action 结果能否追溯的问题。
 
+当前 MVP 停留在这一阶段：直接使用 `grilling_summary` 保存本次 Grill 对 Pattern 的自然语言总结，
+不执行结构化 Observation 提取、Evidence quote 校验、持久化或 review。下面的 Stage 1 仅是未来提案，
+不代表当前实现计划。
+
 ### Stage 1：结构化 Observation，但不自动建模
 
 - Grill 完成后生成结构化 Observation；
