@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 
@@ -678,13 +679,24 @@ def _cmd_drill(state, arg):
         return
 
     sysmsg("⚖️ 判分评估中...")
-    judge_prompt = state.prompts.load("judge.md").format(
+    judge_template = state.prompts.load("judge.md")
+    judge_prompt = judge_template.format(
         question=question,
         reference_answer=reference_answer,
         user_response=user_response,
         target_pattern=drill_spec["target_pattern"]["mechanism"],
         success_signal=drill_spec["target_pattern"]["success_signal"],
     )
+    judge_prompt_sha256 = hashlib.sha256(judge_template.encode("utf-8")).hexdigest()
+    canonical_judge_schema = json.dumps(
+        JUDGE_SCHEMA,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    judge_schema_sha256 = hashlib.sha256(
+        canonical_judge_schema.encode("utf-8")
+    ).hexdigest()
     try:
         judgment = state.llm.chat_json(
             [{"role": "user", "content": judge_prompt}],
@@ -716,6 +728,10 @@ def _cmd_drill(state, arg):
             user_response,
             is_correct,
             feedback,
+            judge_provider=state.cfg.get("provider") or "unknown",
+            judge_model=state.cfg.get("model") or "unknown",
+            judge_prompt_sha256=judge_prompt_sha256,
+            judge_schema_sha256=judge_schema_sha256,
         )
     except Exception as error:
         errmsg(f"保存演练结果失败: {error}")
@@ -797,6 +813,10 @@ def _cmd_status(state, arg):
         (
             "class:dim",
             "  注：Drill 结果不等于未来真实 Error 减少的证明。\n",
+        ),
+        (
+            "class:dim",
+            "  注：删除 Error 会改变累计统计；不同 Judge 版本不可直接比较。\n",
         ),
     ]
     popup_content(body, title="错题库状态看板")

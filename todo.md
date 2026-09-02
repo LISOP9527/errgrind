@@ -1,5 +1,11 @@
 # 当前进度与验证记录
 
+## 2026-09-01：Judge provenance Schema v2
+
+- `drill_attempts` 保存 Judge provider/model、未 format Judge 模板 SHA-256 和 canonical Judge schema SHA-256；v1 旧 attempt 迁移为 `unknown`。
+- `/status` 明确删除 Error 会改变累计数，不同 Judge 版本不可直接比较。
+- 验证：`PYTHONPATH=/root/errgrind-sol-lab /root/errgrind/.venv/bin/python -m unittest discover -s tests -q`，`Ran 72 tests ... OK`。
+
 ## 2026-09-01：Evidence provenance 与 Drill Action ledger
 
 - `error_records` 增加来源与结构化 source 字段；旧记录迁移为 `unknown`，record/OCR/Drill 衍生记录保留来源。

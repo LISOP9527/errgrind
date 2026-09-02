@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 SCHEMA_SQL = """
@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS drill_attempts (
     user_response TEXT NOT NULL,
     is_correct INTEGER NOT NULL CHECK (is_correct IN (0, 1)),
     feedback TEXT NOT NULL,
+    judge_provider TEXT NOT NULL DEFAULT 'unknown',
+    judge_model TEXT NOT NULL DEFAULT 'unknown',
+    judge_prompt_sha256 TEXT NOT NULL DEFAULT 'unknown',
+    judge_schema_sha256 TEXT NOT NULL DEFAULT 'unknown',
     derived_error_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (source_error_id) REFERENCES error_records(id) ON DELETE CASCADE,
@@ -58,5 +62,19 @@ def create_tables(conn):
         conn.execute("ALTER TABLE error_records ADD COLUMN source_error_id INTEGER")
     if "source_drill_attempt_id" not in columns:
         conn.execute("ALTER TABLE error_records ADD COLUMN source_drill_attempt_id INTEGER")
+    attempt_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(drill_attempts)")
+    }
+    for name in (
+        "judge_provider",
+        "judge_model",
+        "judge_prompt_sha256",
+        "judge_schema_sha256",
+    ):
+        if name not in attempt_columns:
+            conn.execute(
+                f"ALTER TABLE drill_attempts ADD COLUMN {name} "
+                "TEXT NOT NULL DEFAULT 'unknown'"
+            )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()

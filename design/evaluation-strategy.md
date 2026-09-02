@@ -20,7 +20,7 @@ ErrGrind 的最终目标是减少未来 Error，但当前可观察到的信号�
 - 用户在这次 Drill 中的作答与判分结果；
 - Drill 答错后生成的新 Error 当前仍保留的 source 关联。
 
-这些字段不能单独证明两条记录来自独立学习事件，也不能证明 Pattern recurrence。
+这些字段不能单独证明两条记录来自独立学习事件，也不能证明 Pattern recurrence；Drill 统计还必须按 Judge provenance 分段，不能跨版本直接比较。
 
 它们暂时不能回答：
 

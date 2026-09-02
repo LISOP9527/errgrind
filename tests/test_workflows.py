@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -6,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from errgrind.cli.commands import (
+    JUDGE_SCHEMA,
     _cmd_drill,
     _cmd_ocr,
     _cmd_record,
@@ -94,6 +96,22 @@ class DatabaseWorkflowTests(unittest.TestCase):
             "updated_at TEXT NOT NULL DEFAULT (datetime('now')))"
         )
         conn.execute("INSERT INTO error_records (question) VALUES ('历史题')")
+        conn.execute(
+            "CREATE TABLE drill_attempts ("
+            "id INTEGER PRIMARY KEY, source_error_id INTEGER NOT NULL, "
+            "drill_spec TEXT NOT NULL, question TEXT NOT NULL, "
+            "reference_answer TEXT NOT NULL, user_response TEXT NOT NULL, "
+            "is_correct INTEGER NOT NULL, feedback TEXT NOT NULL, "
+            "derived_error_id INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now'))"
+            ")"
+        )
+        conn.execute(
+            "INSERT INTO drill_attempts "
+            "(source_error_id, drill_spec, question, reference_answer, "
+            "user_response, is_correct, feedback) "
+            "VALUES (1, '{}', '题', '答', '作答', 1, '旧记录')"
+        )
+        conn.execute("PRAGMA user_version = 1")
         conn.commit()
         conn.close()
 
@@ -109,9 +127,14 @@ class DatabaseWorkflowTests(unittest.TestCase):
             }
             self.assertIn("source_error_id", columns)
             self.assertIn("derived_error_id", columns)
+            attempt = migrated.list_drill_attempts()[0]
+            self.assertEqual(attempt.judge_provider, "unknown")
+            self.assertEqual(attempt.judge_model, "unknown")
+            self.assertEqual(attempt.judge_prompt_sha256, "unknown")
+            self.assertEqual(attempt.judge_schema_sha256, "unknown")
             self.assertEqual(
                 migrated.conn.execute("PRAGMA user_version").fetchone()[0],
-                1,
+                2,
             )
         finally:
             migrated.close()
@@ -332,7 +355,11 @@ class DrillWorkflowTests(unittest.TestCase):
             db=self.db,
             llm=llm,
             prompts=PromptManager(),
-            cfg={"drill_context_n": 10},
+            cfg={
+                "drill_context_n": 10,
+                "provider": "test-provider",
+                "model": "test-model",
+            },
         )
         with (
             patch(
@@ -363,6 +390,29 @@ class DrillWorkflowTests(unittest.TestCase):
         self.assertEqual(attempts[0].source_error_id, self.source_error_id)
         self.assertTrue(attempts[0].is_correct)
         self.assertIsNone(attempts[0].derived_error_id)
+        self.assertEqual(attempts[0].judge_provider, "test-provider")
+        self.assertEqual(attempts[0].judge_model, "test-model")
+        judge_template = PromptManager().load("judge.md")
+        expected_prompt_digest = hashlib.sha256(
+            judge_template.encode("utf-8")
+        ).hexdigest()
+        canonical_schema = json.dumps(
+            JUDGE_SCHEMA,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        expected_schema_digest = hashlib.sha256(
+            canonical_schema.encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(
+            attempts[0].judge_prompt_sha256,
+            expected_prompt_digest,
+        )
+        self.assertEqual(
+            attempts[0].judge_schema_sha256,
+            expected_schema_digest,
+        )
         answer_popup.assert_called_once_with("新的练习题")
         result_popup.assert_called_once()
 

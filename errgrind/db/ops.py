@@ -152,6 +152,10 @@ class Database:
         user_response: str,
         is_correct: bool,
         feedback: str,
+        judge_provider: str = "unknown",
+        judge_model: str = "unknown",
+        judge_prompt_sha256: str = "unknown",
+        judge_schema_sha256: str = "unknown",
     ) -> DrillAttemptResult:
         """原子保存一次判分；错误结果同时创建可追溯的衍生 Error。"""
         if not isinstance(is_correct, bool):
@@ -165,8 +169,9 @@ class Database:
             cur = self.conn.execute(
                 "INSERT INTO drill_attempts "
                 "(source_error_id, drill_spec, question, reference_answer, "
-                "user_response, is_correct, feedback, derived_error_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+                "user_response, is_correct, feedback, judge_provider, judge_model, "
+                "judge_prompt_sha256, judge_schema_sha256, derived_error_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 (
                     source_error_id,
                     drill_spec_json,
@@ -175,6 +180,10 @@ class Database:
                     user_response,
                     int(is_correct),
                     feedback,
+                    judge_provider,
+                    judge_model,
+                    judge_prompt_sha256,
+                    judge_schema_sha256,
                 ),
             )
             attempt_id = int(cur.lastrowid)
@@ -214,6 +223,10 @@ class Database:
                 user_response=row["user_response"],
                 is_correct=bool(row["is_correct"]),
                 feedback=row["feedback"],
+                judge_provider=row["judge_provider"],
+                judge_model=row["judge_model"],
+                judge_prompt_sha256=row["judge_prompt_sha256"],
+                judge_schema_sha256=row["judge_schema_sha256"],
                 derived_error_id=row["derived_error_id"],
                 created_at=datetime.fromisoformat(row["created_at"]),
             )

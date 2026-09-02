@@ -30,6 +30,10 @@ class DrillAttempt:
     user_response: str
     is_correct: bool
     feedback: str
+    judge_provider: str
+    judge_model: str
+    judge_prompt_sha256: str
+    judge_schema_sha256: str
     derived_error_id: Optional[int]
     created_at: datetime
 
