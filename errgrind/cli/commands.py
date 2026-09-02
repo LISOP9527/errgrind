@@ -665,9 +665,18 @@ def _cmd_config(state, arg):
 
         elif key == "provider":
             try:
-                _change_provider(state.cfg)
-                state.llm = _make_llm(state.cfg)
-                save_config(state.cfg)
+                candidate = dict(state.cfg)
+                _change_provider(candidate)
+                new_llm = _make_llm(candidate)
+                save_config(candidate)
+
+                previous_llm = state.llm
+                state.cfg.clear()
+                state.cfg.update(candidate)
+                state.llm = new_llm
+                close_previous = getattr(previous_llm, "close", None)
+                if callable(close_previous):
+                    close_previous()
                 successmsg(f"provider 已切换为 {state.cfg['provider']}")
                 items[2] = (key, f"provider = {state.cfg['provider']}")
             except (KeyboardInterrupt, EOFError):
@@ -680,9 +689,18 @@ def _cmd_model(state, arg):
     from .app import _select_model, _make_llm
 
     try:
-        _select_model(state.cfg)
-        state.llm = _make_llm(state.cfg)
-        save_config(state.cfg)
+        candidate = dict(state.cfg)
+        _select_model(candidate)
+        new_llm = _make_llm(candidate)
+        save_config(candidate)
+
+        previous_llm = state.llm
+        state.cfg.clear()
+        state.cfg.update(candidate)
+        state.llm = new_llm
+        close_previous = getattr(previous_llm, "close", None)
+        if callable(close_previous):
+            close_previous()
         successmsg(f"model 已切换为 {state.cfg.get('model', '?')}")
     except (KeyboardInterrupt, EOFError):
         sysmsg("取消")
@@ -701,7 +719,7 @@ def _cmd_help(state, arg):
         ]),
         ("⚙️ 系统与模型配置", [
             ("/config", "调整 drill 条数、grill 轮数或 AI 提供商"),
-            ("/model", "快捷切换 AI 模型 (如 gemini-3.6-flash / deepseek-chat)"),
+            ("/model", "快捷切换 AI 模型（Gemini / DeepSeek / OpenCode / Codex）"),
             ("/help", "显示本命令帮助指南"),
             ("/exit", "退出 ErrGrind 应用"),
         ])

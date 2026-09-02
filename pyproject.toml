@@ -10,6 +10,13 @@ dependencies = [
     "prompt_toolkit>=3.0.0",
 ]
 
+[project.optional-dependencies]
+# The SDK pins a platform-specific Codex runtime.  Keep it optional so an
+# unsupported runtime wheel does not prevent Gemini/DeepSeek/OpenCode users
+# from installing ErrGrind at all.  install.sh enables this extra whenever the
+# matching runtime is available.
+codex = ["openai-codex==0.147.0"]
+
 [project.scripts]
 errgrind = "errgrind.main:main"
 

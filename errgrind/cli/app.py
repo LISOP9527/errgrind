@@ -1,12 +1,19 @@
 import sys
+import webbrowser
 
 import httpx
 from rich.columns import Columns
 from rich.panel import Panel
 
-from ..config import DEFAULT_GEMINI_MODEL, load as load_config, save as save_config
+from ..config import (
+    DEFAULT_CODEX_MODEL,
+    DEFAULT_GEMINI_MODEL,
+    load as load_config,
+    save as save_config,
+)
 from ..db.ops import Database
 from ..llm.client import DEEPSEEK_BASE_URL, GO_BASE_URL, LLMClient, LLMError
+from ..llm.codex import CodexClient, CodexError
 from ..llm.gemini import GeminiClient, GeminiError
 from ..llm.prompts import PromptManager
 from .commands import COMMANDS, COMMAND_DESCRIPTIONS
@@ -20,6 +27,7 @@ PROVIDERS = {
     "gemini": ("Gemini（谷歌）", GeminiClient, GeminiError),
     "deepseek": ("DeepSeek", LLMClient, LLMError),
     "opencode": ("OpenCode Go（订阅）", LLMClient, LLMError),
+    "codex": ("Codex（ChatGPT 订阅）", CodexClient, CodexError),
 }
 
 OLD_ZEN_URL = "https://opencode.ai/zen/v1"
@@ -49,6 +57,86 @@ def _fetch_llm_models(base_url, api_key):
         return []
 
 
+def _fetch_codex_models():
+    client = None
+    try:
+        client = CodexClient(model=DEFAULT_CODEX_MODEL)
+        response = client.models()
+        entries = getattr(response, "data", response if isinstance(response, list) else [])
+        models = []
+        default_model = ""
+        for entry in entries:
+            model = getattr(entry, "model", None) or getattr(entry, "id", None)
+            if not isinstance(model, str) or not model:
+                continue
+            models.append(model)
+            if getattr(entry, "is_default", False):
+                default_model = model
+        return list(dict.fromkeys(models)), default_model
+    except Exception:
+        return [], ""
+    finally:
+        if client is not None:
+            client.close()
+
+
+def _codex_logged_in(account_response):
+    if isinstance(account_response, dict):
+        return account_response.get("account") is not None or bool(account_response.get("logged_in"))
+    return getattr(account_response, "account", None) is not None
+
+
+def _complete_codex_login(client):
+    methods = ["浏览器登录（推荐）", "设备码登录（远程/无浏览器环境）"]
+    idx = select_from_list(methods, lambda item: item, title="登录 ChatGPT Codex")
+    if idx is None:
+        raise KeyboardInterrupt
+
+    handle = client.login_chatgpt() if idx == 0 else client.login_chatgpt_device_code()
+    if idx == 0:
+        url = handle.auth_url
+        console.print("\n [cyan]请在浏览器中完成 ChatGPT 登录：[/cyan]")
+        console.print(f" [link={url}]{url}[/link]\n")
+    else:
+        url = handle.verification_url
+        console.print("\n [cyan]请打开以下地址并输入设备码：[/cyan]")
+        console.print(f" [link={url}]{url}[/link]")
+        console.print(f" [bold bright_white]{handle.user_code}[/bold bright_white]\n")
+
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+    console.print(" [dim]等待登录完成，按 Ctrl+C 可取消...[/dim]")
+    try:
+        result = handle.wait()
+    except KeyboardInterrupt:
+        try:
+            handle.cancel()
+        finally:
+            raise
+    if not getattr(result, "success", False):
+        detail = getattr(result, "error", None) or "未知错误"
+        raise CodexError(f"ChatGPT 登录失败: {detail}")
+
+
+def _configure_codex_login():
+    client = CodexClient(model=DEFAULT_CODEX_MODEL)
+    try:
+        try:
+            if not _codex_logged_in(client.account(refresh_token=True)):
+                _complete_codex_login(client)
+            if not _codex_logged_in(client.account(refresh_token=True)):
+                raise CodexError("ChatGPT 登录未完成")
+        except CodexError:
+            raise
+        except Exception as exc:
+            raise CodexError(f"无法读取 ChatGPT 登录状态: {exc}") from exc
+    finally:
+        client.close()
+
+
 def _select_model(cfg):
     console.print(" [dim]正在获取可用模型...[/dim]")
     provider = cfg["provider"]
@@ -65,6 +153,9 @@ def _select_model(cfg):
             cfg["base_url"] = GO_BASE_URL
         models = _fetch_llm_models(cfg["base_url"], cfg["api_key"])
         default_model = "deepseek-v4-flash"
+    elif provider == "codex":
+        models, discovered_default = _fetch_codex_models()
+        default_model = discovered_default or DEFAULT_CODEX_MODEL
 
     if models:
         if default_model in models:
@@ -91,26 +182,36 @@ def _change_provider(cfg):
     idx = select_from_list(provider_names, lambda n: n, title="选择 AI 提供商")
     if idx is None:
         raise KeyboardInterrupt
-    cfg["provider"] = provider_keys[idx]
+    candidate = dict(cfg)
+    candidate["provider"] = provider_keys[idx]
 
-    val = popup_input("API Key", "输入 API key：", multiline=False)
-    if val is None:
-        raise KeyboardInterrupt
-    cfg["api_key"] = val.strip()
+    if candidate["provider"] == "codex":
+        candidate["api_key"] = ""
+        candidate.pop("base_url", None)
+        _configure_codex_login()
+    else:
+        val = popup_input("API Key", "输入 API key：", multiline=False)
+        if val is None:
+            raise KeyboardInterrupt
+        candidate["api_key"] = val.strip()
 
-    if cfg["provider"] == "opencode":
+    if candidate["provider"] == "opencode":
         base = popup_input("API 地址", f"输入 API 地址（默认 {GO_BASE_URL}）：", multiline=False)
         if base is None:
             raise KeyboardInterrupt
-        cfg["base_url"] = base.strip() or GO_BASE_URL
+        candidate["base_url"] = base.strip() or GO_BASE_URL
 
-    _select_model(cfg)
+    _select_model(candidate)
+    cfg.clear()
+    cfg.update(candidate)
 
 
 def _make_llm(cfg):
     provider = cfg["provider"]
     info = PROVIDERS[provider]
-    api_key = cfg["api_key"]
+    # Codex authentication is owned by its app-server and therefore does not
+    # require an api_key entry in ErrGrind's config file.
+    api_key = cfg.get("api_key", "")
 
     if provider == "gemini":
         return info[1](api_key=api_key, model=cfg.get("model", DEFAULT_GEMINI_MODEL))
@@ -120,6 +221,18 @@ def _make_llm(cfg):
             base_url=cfg.get("base_url", GO_BASE_URL),
             model=cfg.get("model", "deepseek-v4-flash"),
         )
+    if provider == "codex":
+        client = info[1](model=cfg.get("model", DEFAULT_CODEX_MODEL))
+        try:
+            if not _codex_logged_in(client.account(refresh_token=True)):
+                raise CodexError("ChatGPT Codex 尚未登录，请在 /config 中重新选择 codex")
+        except CodexError:
+            client.close()
+            raise
+        except Exception as exc:
+            client.close()
+            raise CodexError(f"无法读取 ChatGPT 登录状态: {exc}") from exc
+        return client
     return info[1](
         api_key=api_key,
         base_url=DEEPSEEK_BASE_URL,
@@ -129,6 +242,23 @@ def _make_llm(cfg):
 
 def _ensure_config():
     cfg = load_config()
+    if cfg.get("provider") == "codex":
+        # Clean up legacy/manual settings that do not belong to the Codex
+        # provider.  In particular, never keep an API key beside the SDK's
+        # own ChatGPT credential store.
+        stale_fields = [
+            key for key in ("api_key", "base_url") if key in cfg
+        ]
+        if stale_fields:
+            for key in stale_fields:
+                cfg.pop(key, None)
+            save_config(cfg)
+        # Codex keeps OAuth credentials in its own app-server/CLI store.  A
+        # saved ErrGrind config only records the provider and model, so make
+        # an unauthenticated first run useful instead of failing before the
+        # command loop (where /config would otherwise be unreachable).
+        _configure_codex_login()
+        return cfg
     if cfg.get("api_key"):
         if cfg.get("provider") == "opencode" and cfg.get("base_url") == OLD_ZEN_URL:
             cfg["base_url"] = GO_BASE_URL
@@ -195,9 +325,17 @@ def run_session():
     except (KeyboardInterrupt, EOFError):
         console.print("\n[yellow]已取消[/yellow]")
         sys.exit(0)
+    except (LLMError, GeminiError, CodexError) as e:
+        errmsg(f"AI 提供商配置失败: {e}")
+        return
 
     db = Database()
-    llm = _make_llm(cfg)
+    try:
+        llm = _make_llm(cfg)
+    except (LLMError, GeminiError, CodexError) as e:
+        errmsg(f"AI 提供商启动失败: {e}")
+        db.close()
+        return
     prompts = PromptManager()
 
     state = AppState(db=db, llm=llm, prompts=prompts, cfg=cfg)
@@ -228,7 +366,7 @@ def run_session():
                     break
                 except KeyboardInterrupt:
                     break
-                except (LLMError, GeminiError) as e:
+                except (LLMError, GeminiError, CodexError) as e:
                     errmsg(f"API 错误: {e}")
                 except Exception as e:
                     errmsg(f"错误: {e}")
@@ -237,4 +375,7 @@ def run_session():
         else:
             sysmsg("请输入以 / 开头的命令（如 /resume），输入 /help 查看全部")
 
+    close_llm = getattr(llm, "close", None)
+    if callable(close_llm):
+        close_llm()
     db.close()

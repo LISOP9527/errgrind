@@ -22,3 +22,4 @@ YYYY-MM-DD-short-title.md
 - [Grill 与 Teach 会话生命周期](2026-07-27-conversation-lifecycle.md)：完成的 Grill 只读，partial Grill 可恢复，Teach 作为可持续进入的单一会话。
 - [终端内容渲染边界](2026-07-27-terminal-content-rendering.md)：所有动态内容通过统一 UI 入口渲染，终端适配不污染标准 Markdown + LaTeX 数据。
 - [Drill 两阶段规格隔离](2026-07-28-drill-spec-isolation.md)：先从历史 Error 生成公共 DrillSpec，再由看不到原题的 Draft 出题；MVP 不引入多级自审。
+- [Codex provider 通过官方 app-server 接入](2026-08-29-codex-app-server-provider.md)：复用官方 SDK 的 ChatGPT 登录和凭据生命周期，ErrGrind 不自行持有 OAuth token。

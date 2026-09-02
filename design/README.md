@@ -14,6 +14,7 @@
 - [Grill 与 Teach 会话生命周期](decisions/2026-07-27-conversation-lifecycle.md)：完成的 Grill 只读，Teach 持续追加。
 - [终端内容渲染边界](decisions/2026-07-27-terminal-content-rendering.md)：标准 Markdown + LaTeX 保持在数据层，终端统一在 UI 边界降级渲染。
 - [Drill 两阶段规格隔离](decisions/2026-07-28-drill-spec-isolation.md)：采用 Spec -> Draft 两阶段出题，保留原题信息边界和可人工调优的 Prompt。
+- [Codex provider 通过官方 app-server 接入](decisions/2026-08-29-codex-app-server-provider.md)：使用官方 SDK 管理 ChatGPT 登录和 token，ErrGrind 只保留 provider/model 配置。
 
 ## 维护规则
 

@@ -6,6 +6,10 @@ import shutil
 CONFIG_DIR = os.path.expanduser("~/.config/errgrind")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+# Use a generic Codex model as the offline fallback.  A first-run model picker
+# replaces it with the account's current default whenever the app-server model
+# catalog is reachable.
+DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
 
 
 def get_database_path(data_dir: str | None = None) -> str:
@@ -45,8 +49,11 @@ def load() -> dict:
         return dict(DEFAULT_CONFIG)
     with open(CONFIG_PATH) as f:
         cfg = json.load(f)
+    had_model = "model" in cfg
     for k, v in DEFAULT_CONFIG.items():
         cfg.setdefault(k, v)
+    if cfg.get("provider") == "codex" and not had_model:
+        cfg["model"] = DEFAULT_CODEX_MODEL
     return cfg
 
 

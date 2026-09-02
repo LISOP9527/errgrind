@@ -116,6 +116,7 @@ teach 在 `pending-grill`（包括已有 partial grilling 对话）时禁止
 - SQLite（内置 sqlite3，无 ORM）
 - prompt_toolkit（多行输入、快捷键、列表选择）
 - Gemini API + DeepSeek API（OpenAI 兼容接口）+ OpenCode Go（OpenAI 兼容接口）
+- OpenAI 官方 `openai-codex` SDK/app-server（ChatGPT 订阅登录）
 - httpx（HTTP 请求，项目直接依赖）
 
 ## 目录结构
@@ -133,6 +134,7 @@ errgrind/
 │   ├── llm/
 │   │   ├── prompts.py         # PromptManager（从 prompts/ 加载文件）
 │   │   ├── gemini.py          # Gemini 客户端（httpx）
+│   │   ├── codex.py           # Codex 官方 SDK/app-server 适配器（OAuth 由 SDK 管理）
 │   │   └── client.py          # DeepSeek / OpenCode 客户端（openai 库）
 │   ├── models/
 │   │   └── types.py           # ErrorRecord 数据模型
@@ -207,7 +209,7 @@ CREATE TABLE error_records (
 
 ## 运行命令
 - `errgrind` — 启动交互式 CLI
-- 首次启动通过配置向导填写 provider、API key 和 model，并保存到 `~/.config/errgrind/config.json`
+- 首次启动通过配置向导选择 provider 和 model；Gemini / DeepSeek / OpenCode 填 API key，Codex 在浏览器或设备码登录，并保存配置到 `~/.config/errgrind/config.json`
 - 启动后提示「可通过 /help 查看命令」
 
 ## 配置（`~/.config/errgrind/config.json`）
@@ -221,7 +223,9 @@ CREATE TABLE error_records (
 }
 ```
 
-`/config` 可编辑 `drill_context_n`、`grill_max_turns`、`provider`（改 provider 连带问 api_key + 选 model）。
+`/config` 可编辑 `drill_context_n`、`grill_max_turns`、`provider`（普通 provider 会填写 API key，Codex 会进入登录流程，并统一选择 model）。
+
+选择 Codex 时不填写 API key；ChatGPT OAuth、token 保存与刷新由 Codex app-server 管理，ErrGrind 不读取 `~/.codex/auth.json`。
 
 ## 首次设置（新环境）
 ```bash
@@ -235,6 +239,7 @@ errgrind
 - 2026-07-27 使用项目配置的免费 API 实测：`gemini-3.6-flash`、`gemini-3.5-flash-lite` 等模型均可用；当前默认推荐 `gemini-3.6-flash`
 - Gemini API 需要一个 dummy user message（`"开始吧"`）来满足 `contents` 非空要求
 - Gemini 用 `system_instruction` 字段传系统 prompt，不能放在 `contents` 数组里（已在 `gemini.py` 处理）
+- Codex provider 依赖官方 `openai-codex` SDK 及其匹配的 CLI runtime；部分非主流平台可能没有可安装的 runtime wheel
 - 多行输入用 prompt_toolkit：Enter 提交，Alt+Enter 换行
 - 数据库文件自动创建在 `~/.local/share/errgrind/errgrind.db`（设置 `XDG_DATA_HOME` 时遵循该目录）；首次使用新路径时会复制旧的 `data/errgrind.db`，旧文件保留
 - grilling 第一次回复就含 `[GRILLING_END]` 是允许的（AI 判断题目简单）
