@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: errgrind
-Version: 0.1.0
-Summary: 错题训练器 — CLI 刷题软件
-Requires-Python: >=3.11
-Requires-Dist: rich>=13.0.0
-Requires-Dist: openai>=1.0.0
-Requires-Dist: prompt_toolkit>=3.0.0

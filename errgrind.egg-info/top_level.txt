@@ -1,4 +1,0 @@
-errgrind
-prompts
-reference
-tests
