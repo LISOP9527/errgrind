@@ -339,6 +339,7 @@ def _cmd_record(state, arg):
         question=question.strip(),
         user_thoughts=user_thoughts.strip() or None,
         reference_answer=reference_answer.strip() or None,
+        origin="record",
     )
     successmsg(f"已成功录入错题库 (Error #{error_id})")
     sysmsg("输入 /resume 开始处理错题")
@@ -406,6 +407,7 @@ def _cmd_ocr(state, arg):
         question=question.strip(),
         user_thoughts=user_thoughts.strip(),
         reference_answer=reference_answer.strip() or None,
+        origin="ocr",
     )
     successmsg(f"OCR 校对完成，已录入错题库 (Error #{error_id})")
     sysmsg("输入 /resume 开始处理错题")
@@ -570,10 +572,10 @@ def _normalize_drill_spec(raw_spec, source_records):
     if any(term in public_text for term in comparison_terms):
         raise ValueError("公开 DrillSpec 只能正面描述新题，不能引用原题")
 
-    source_texts = [question for question, _ in source_records]
+    source_texts = [record.question for record in source_records]
     source_texts.extend(
-        summary
-        for index, (_, summary) in enumerate(source_records)
+        record.grilling_summary
+        for index, record in enumerate(source_records)
         if index != source_index
     )
     leaked_terms = {
@@ -652,13 +654,13 @@ def _cmd_drill(state, arg):
         return
 
     error_context = "\n\n".join(
-        f"[Error {i+1}]\n[原题]\n{q}\n[Grill 摘要]\n{s}"
-        for i, (q, s) in enumerate(context)
+        f"[Error {i+1}]\n[原题]\n{item.question}\n[Grill 摘要]\n{item.grilling_summary}"
+        for i, item in enumerate(context)
     )
 
     sysmsg("🧠 正在从近期 Error 中提炼出题规格...")
     try:
-        drill_spec, _ = _request_drill_spec(state, error_context, context)
+        drill_spec, source_index = _request_drill_spec(state, error_context, context)
     except Exception as e:
         errmsg(f"提炼出题规格失败: {e}")
         return
@@ -703,11 +705,41 @@ def _cmd_drill(state, arg):
         return
     feedback = feedback.strip()
 
+    source_error_id = context[source_index].error_id
+    spec_json = json.dumps(drill_spec, ensure_ascii=False)
+
+    derived_error = None
+    if not is_correct:
+        derived_error = {
+            "question": question,
+            "user_thoughts": user_response,
+            "reference_answer": reference_answer,
+        }
+
+    try:
+        attempt_result = state.db.record_drill_attempt(
+            source_error_id,
+            spec_json,
+            question,
+            reference_answer,
+            user_response,
+            is_correct,
+            feedback,
+            derived_error=derived_error,
+        )
+    except Exception as error:
+        errmsg(f"保存演练结果失败: {error}")
+        return
+
     if is_correct:
-        popup_content("🎉 回答正确！思维 Pattern 掌握良好！", title="演练评估结果")
-        successmsg("回答正确！成功攻克思维盲区！")
+        popup_content(
+            "本次演练判定为正确。该结果会作为一次干预记录保存，"
+            "不等于未来错误已减少。",
+            title="演练评估结果",
+        )
+        successmsg("本次演练判定为正确，结果已记录")
     else:
-        body = [("bold red", "❌ 答错了，相关 Pattern 仍需巩固\n\n")]
+        body = [("bold red", "❌ 本次演练判定为错误\n\n")]
         if feedback:
             body.append(("class:label", "💡 评估反馈:\n"))
             body.extend(render_markdown_to_formatted_text(feedback))
@@ -715,17 +747,17 @@ def _cmd_drill(state, arg):
         popup_content(body, title="演练评估结果")
         errmsg("答错了，已自动将此衍生题作为新 Error 入库")
 
-        new_id = state.db.create_error(
-            question=question,
-            user_thoughts=user_response,
-            reference_answer=reference_answer,
+        sysmsg(
+            f"新 error (ID: #{attempt_result.derived_error_id}) 已入库，"
+            "可随时输入 /resume 处理"
         )
-        sysmsg(f"新 error (ID: #{new_id}) 已入库，可随时输入 /resume 处理")
 
 
 @_register("status", "查看 error 状态统计")
 def _cmd_status(state, arg):
     counts = state.db.count_by_status()
+    origin_counts = state.db.count_by_origin()
+    drill_stats = state.db.drill_stats()
     total = counts['total']
 
     def make_bar(cnt, total_num, width=15):
@@ -752,6 +784,30 @@ def _cmd_status(state, arg):
 
         ("class:dim", "  ───────────────────────────────────────────────────\n"),
         ("class:subtitle", f"  🗂  数据库累计错题总数:  {total} 条\n"),
+        (
+            "class:dim",
+            "  来源: "
+            + "；".join(
+                f"{label}={origin_counts[key]}"
+                for key, label in (
+                    ("record", "手动录入"),
+                    ("ocr", "OCR 校对"),
+                    ("drill", "Drill 衍生"),
+                    ("unknown", "历史来源未知"),
+                )
+            )
+            + "\n",
+        ),
+        (
+            "class:dim",
+            f"  Drill 干预记录: 总计 {drill_stats['total']} 次，"
+            f"正确 {drill_stats['correct']} 次，"
+            f"错误 {drill_stats['incorrect']} 次\n",
+        ),
+        (
+            "class:dim",
+            "  注：Drill 结果不等于未来真实 Error 减少的证明。\n",
+        ),
     ]
     popup_content(body, title="错题库状态看板")
 

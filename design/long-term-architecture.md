@@ -10,6 +10,8 @@ Evidence
 
 形成一个持续优化的闭环。
 
+当前 MVP 的最小可审计实现是：Error 记录保留 `origin`、`source_error_id` 与 `source_drill_attempt_id` provenance，Drill 判分保留为 Action ledger。该 ledger 记录干预结果，但不等同于 Future Error 减少的证明；后者需要后续真实学习事件和时间窗口分析。
+
 ---
 
 ## Evidence（证据）

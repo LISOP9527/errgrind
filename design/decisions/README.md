@@ -24,3 +24,4 @@ YYYY-MM-DD-short-title.md
 - [Drill 两阶段规格隔离](2026-07-28-drill-spec-isolation.md)：先从历史 Error 生成公共 DrillSpec，再由看不到原题的 Draft 出题；MVP 不引入多级自审。
 - [Codex provider 通过官方 app-server 接入](2026-08-29-codex-app-server-provider.md)：复用官方 SDK 的 ChatGPT 登录和凭据生命周期，ErrGrind 不自行持有 OAuth token。
 - [OCR 作为需人工校对的录题入口](2026-08-31-ocr-as-reviewed-input.md)：图片识别结果必须经人工编辑确认，数据库只保存确认后的文本。
+- [Evidence 来源与 Drill Action Ledger](2026-09-01-evidence-provenance-drill-ledger.md)：记录来源 provenance 与 Drill 干预账本；不把正确率当作未来 Error 减少证明。

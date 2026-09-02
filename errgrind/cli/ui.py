@@ -383,6 +383,27 @@ def render_error_detail(error, error_number: int, width: int = 72):
     """渲染工作台右栏，动态内容统一支持 Markdown 和终端数学格式。"""
     _, badge = render_status_badge(error.status)
     lines = [("class:title", f"Error #{error_number}  {badge}\n")]
+    origin_labels = {
+        "record": "手动录入",
+        "ocr": "OCR 校对",
+        "drill": "Drill 衍生",
+        "unknown": "历史来源未知",
+    }
+    origin = getattr(error, "origin", "unknown")
+    lines.append(
+        ("class:dim", f"来源: {origin_labels.get(origin, '历史来源未知')}\n")
+    )
+    source_id = getattr(error, "source_error_id", None)
+    attempt_id = getattr(error, "source_drill_attempt_id", None)
+    if source_id or attempt_id:
+        lines.append(
+            (
+                "class:dim",
+                "数据库关联 ID: "
+                f"source_error_id={source_id or '-'}，"
+                f"source_drill_attempt_id={attempt_id or '-'}\n",
+            )
+        )
     lines.append(("class:dim", f"创建时间: {error.created_at.strftime('%Y-%m-%d %H:%M')}\n"))
     lines.append(("class:dim", "─────────────────────────────────────────────────────\n\n"))
 
