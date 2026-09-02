@@ -277,7 +277,7 @@ errgrind
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-当前 59 项测试覆盖：prompt 模板格式化、Markdown / LaTeX 终端渲染、Grill 结束标记、OpenAI 兼容接口与 Gemini SSE 流式输出、数据库路径迁移、Error 状态机、删除、`/record` 必填思路、OCR 图片校验与 provider 请求格式、OCR 校对/取消、Codex provider、Grill / Teach 会话恢复、严格 JSON schema，以及 `/drill` 答对/答错分支。
+当前 60 项测试覆盖：prompt 模板格式化、Markdown / LaTeX 终端渲染、Grill 结束标记、OpenAI 兼容接口与 Gemini SSE 流式输出、数据库路径迁移、Error 状态机、删除、`/record` 必填思路、OCR 图片校验与 provider 请求格式、OCR 校对/取消、Codex provider、Grill / Teach 会话恢复、严格 JSON schema，以及 `/drill` 答对/答错分支。
 
 ---
 

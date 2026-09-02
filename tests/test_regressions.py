@@ -65,11 +65,44 @@ class PromptFormattingTests(unittest.TestCase):
                 "target_pattern": "p",
                 "success_signal": "s",
             },
+            "ocr.md": {},
         }
 
         for name, substitutions in values.items():
             with self.subTest(name=name):
-                prompts.load(name).format(**substitutions)
+                template = prompts.load(name)
+                if substitutions:
+                    template.format(**substitutions)
+                else:
+                    self.assertTrue(template.strip())
+
+    def test_drill_prompts_preserve_contract_and_diagnostic_semantics(self):
+        prompts = PromptManager()
+        draft = prompts.load("drill.md")
+        spec = prompts.load("drill_spec.md")
+
+        self.assertIn("{drill_spec}", draft)
+        self.assertIn('"question"', draft)
+        self.assertIn('"reference_answer"', draft)
+        self.assertIn("严格 JSON", draft)
+        self.assertIn("不得人为排斥其他数学上正确的解法", draft)
+        self.assertIn("中性方式要求学生展示", draft)
+        self.assertIn("静默自检", draft)
+        for field in ("level", "reasoning_depth", "calculation_load"):
+            self.assertIn(f"`{field}`", draft)
+
+        self.assertIn("{error_context}", spec)
+        self.assertIn("只选择一个", spec)
+        self.assertIn("改变表面情境", spec)
+        self.assertIn("功能等价", spec)
+        self.assertIn("不绑定固定措辞或唯一解法", spec)
+        self.assertIn("`reasoning_depth`", spec)
+        self.assertIn("`calculation_load`", spec)
+
+        judge = prompts.load("judge.md")
+        self.assertIn("功能等价的思考行为", judge)
+        self.assertIn("不能仅因方法不同而判错", judge)
+        self.assertIn("思路证据不足", judge)
 
 
 class JsonRetryTests(unittest.TestCase):
