@@ -6,6 +6,8 @@
 
 - [长期架构](long-term-architecture.md)：Evidence -> State -> Policy -> Action -> New Evidence 的系统闭环。
 - [核心原则](core-principles.md)：ErrGrind 为什么围绕 Pattern、State、Policy 和减少未来 Error 设计。
+- [Pattern State 演进提案](pattern-state-proposal.md)：从单次 Grill 假设逐步建立可审查、可证伪的 Pattern State，区分真实 Evidence 与干预结果。
+- [“减少未来 Error”的验证策略](evaluation-strategy.md)：区分流程、模型、行为迁移和真实结果，说明 recurrence、盲法关联与学习机会分母。
 - [架构解耦原则](ui-decoupling.md)：从 TUI 演进到 GUI / Mobile 时必须遵守的 Core/UI 边界。
 
 ## 决策记录
