@@ -7,6 +7,7 @@ from typing import Optional
 import httpx
 
 from ..config import DEFAULT_GEMINI_MODEL
+from .ocr import OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result
 
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -138,8 +139,11 @@ class GeminiClient:
                     raise GeminiError(f"Gemini API 调用失败: {e}") from e
 
     def chat_json(self, messages: list[dict], **kwargs) -> dict:
+        output_schema = kwargs.pop("output_schema", None)
         config = dict(kwargs.pop("generation_config", {}))
         config["response_mime_type"] = "application/json"
+        if output_schema is not None:
+            config["response_schema"] = output_schema
         config.setdefault("temperature", 0.2)
         retry_messages = list(messages)
         last_error = None
@@ -174,3 +178,46 @@ class GeminiClient:
                         },
                     ]
         raise GeminiError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")
+
+    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
+        """Transcribe an image with Gemini inline image data."""
+        payload = load_image(image_path)
+        body = {
+            "system_instruction": {"parts": [{"text": prompt}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "请按照系统规则转录这张数学错题图片。"},
+                        {
+                            "inline_data": {
+                                "mime_type": payload.mime_type,
+                                "data": payload.base64_data,
+                            }
+                        },
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "response_schema": OCR_OUTPUT_SCHEMA,
+                "temperature": 0.0,
+            },
+        }
+        url = f"{GEMINI_BASE}/{self.model}:generateContent"
+        last: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                response = httpx.post(
+                    url,
+                    params={"key": self.api_key},
+                    json=body,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return parse_ocr_result(self._response_text(response.json()))
+            except Exception as exc:
+                last = exc
+                if attempt + 1 < self.max_retries:
+                    time.sleep(2**attempt)
+        raise GeminiError(f"Gemini OCR 调用失败: {last}") from last

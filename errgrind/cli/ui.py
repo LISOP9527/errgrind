@@ -560,8 +560,13 @@ def select_error_split_view(errors):
     return app.run()
 
 
-def popup_input(title: str, prompt_text: str, multiline: bool = True) -> str | None:
-    text_area = TextArea(multiline=multiline, wrap_lines=True)
+def popup_input(
+    title: str,
+    prompt_text: str,
+    multiline: bool = True,
+    initial_text: str = "",
+) -> str | None:
+    text_area = TextArea(text=initial_text, multiline=multiline, wrap_lines=True)
     kb = KeyBindings()
 
     @kb.add("escape", "enter")

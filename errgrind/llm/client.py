@@ -6,6 +6,8 @@ from typing import Optional
 
 from openai import OpenAI
 
+from .ocr import load_image, parse_ocr_result
+
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 GO_BASE_URL = "https://opencode.ai/zen/go/v1"
@@ -76,6 +78,10 @@ class LLMClient:
                     raise LLMError(f"API 调用失败: {e}") from e
 
     def chat_json(self, messages: list[dict], **kwargs) -> dict:
+        # Some OpenAI-compatible providers only support json_object, not the
+        # newer json_schema mode.  The shared command layer still validates
+        # the returned fields locally.
+        kwargs.pop("output_schema", None)
         kwargs.setdefault("temperature", 0.2)
         retry_messages = list(messages)
         last_error = None
@@ -110,3 +116,26 @@ class LLMClient:
                         },
                     ]
         raise LLMError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")
+
+    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
+        """Use the OpenAI-compatible multimodal message format for OCR."""
+        payload = load_image(image_path)
+        result = self.chat_json(
+            [
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "请按照系统规则转录这张数学错题图片。",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": payload.data_url},
+                        },
+                    ],
+                },
+            ]
+        )
+        return parse_ocr_result(result)

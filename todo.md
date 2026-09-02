@@ -1,0 +1,43 @@
+# 当前进度与验证记录
+
+## 2026-08-31：OCR 录题与 Codex 真实全流程
+
+已实现：
+
+- `/ocr [图片路径]` 支持 PNG、JPEG、WebP（最大 20 MB），按文件内容签名校验，不信任扩展名。
+- Codex 使用官方 `LocalImageInput`；Gemini 使用 `inline_data`；OpenAI 兼容 provider 使用标准
+  `image_url` data URL。
+- OCR 严格拆分题目、学生思路、参考答案，三个字段逐项预填供用户校对；任一步取消都不入库。
+- 数据库只保存校对后的文本，不保存原图，后续状态机与 `/record` 一致。
+- Codex DrillSpec、题目草稿、判分增加各自的严格 JSON schema；修复通用工作流词和数学函数名被
+  源文本泄漏校验误判的问题。
+
+离线验证：
+
+```text
+.venv/bin/python -m unittest discover -s tests -v
+Ran 59 tests ... OK
+```
+
+真实验证使用已登录的 Codex `gpt-5.6-sol` 和隔离数据库
+`/tmp/errgrind-real-e2e-y6wz9j2f/errgrind.db`，没有写入正式错题库：
+
+1. 一张带轻微倾斜和扫描噪声的数学错题 PNG 成功识别题目、学生错误演算、参考答案；公式转成
+   LaTeX，三个区域没有混淆。真实 `/ocr` 校对后创建 `pending-grill` 记录。
+2. 由易到难完成 5 组真实 Grill → Teach：百分比变化基准、根式方程增根、条件概率样本空间、
+   不可导临界点、反向使用级数判别法。每组经 2–3 次学生回答后形成可迁移 Pattern，随后 Teach
+   保存并进入 `done`。
+3. `/drill` 正确分支生成几何命题证明/反例题，参考级作答被判正确，记录数保持 5。
+4. `/drill` 错误分支识别出缺少条件验证的作答，记录数从 5 增至 6，新记录状态为
+   `pending-grill`。
+5. 最终隔离库状态：`done=5`、`pending-grill=1`、`pending-teach=0`、`total=6`。
+
+真实测试发现并修复：
+
+- 原 Codex `chat_json` 的宽松 schema 被真实 API 以 `invalid_json_schema` 拒绝；现由业务调用传入
+  字段完整且 `additionalProperties=false` 的严格 schema。
+- 源文本泄漏校验曾把 `Error Pattern`、`sqrt` 等通用词当作原题指纹，导致 DrillSpec 三次重试
+  后失败；现只拦截真正具有题目特异性的标记和表达式。
+
+尚未宣称：Gemini、DeepSeek、OpenCode 的图片 OCR 只完成离线请求格式回归，未在本轮发送真实
+图片请求；其中 DeepSeek/OpenCode 是否支持图片仍取决于具体模型。

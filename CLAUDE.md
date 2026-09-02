@@ -78,6 +78,7 @@ Drill 的目标是帮助用户建立新的思维模式，而不是立即验证 T
 | 命令 | 职责 |
 |---|---|
 | `/record` | 通过三步输入弹窗记录一个 error（只入库，状态 = `pending-grill`） |
+| `/ocr [图片路径]` | OCR 识别数学错题图片，逐项校对后入库（状态 = `pending-grill`） |
 | `/resume` | 双栏工作台浏览 error；方向键选择，Enter 默认处理，`g`/`t` 触发 grill/teach，`d` 删除 |
 | `/drill` | 用最近 N 条 grilled error 作为上下文，出综合开放题 |
 | `/status` | 全屏状态看板显示 pending-grill / pending-teach / done / 总计数量 |
@@ -86,7 +87,7 @@ Drill 的目标是帮助用户建立新的思维模式，而不是立即验证 T
 | `/help` | 全屏命令指南 |
 | `/exit` | 退出 |
 
-工作流（grill → teach → drill）通过 `/record` 录入后，在 `/resume` 双栏工作台内以 `g`/`t` 键按需触发，drill 是独立的 `/drill` 命令。`d` 会先请求确认，再永久删除当前 error。
+工作流（grill → teach → drill）通过 `/record` 或 `/ocr` 录入后，在 `/resume` 双栏工作台内以 `g`/`t` 键按需触发，drill 是独立的 `/drill` 命令。`d` 会先请求确认，再永久删除当前 error。
 
 ### Error 状态机
 
@@ -133,6 +134,7 @@ errgrind/
 │   │   └── ops.py             # CRUD 操作
 │   ├── llm/
 │   │   ├── prompts.py         # PromptManager（从 prompts/ 加载文件）
+│   │   ├── ocr.py             # 图片校验与 OCR 输出契约
 │   │   ├── gemini.py          # Gemini 客户端（httpx）
 │   │   ├── codex.py           # Codex 官方 SDK/app-server 适配器（OAuth 由 SDK 管理）
 │   │   └── client.py          # DeepSeek / OpenCode 客户端（openai 库）
@@ -147,7 +149,8 @@ errgrind/
 │   ├── grilling.md            # Socratic 审讯系统 prompt（针对数学，[GRILLING_END] 结束标记）
 │   ├── teach.md               # 讲解 + Q&A 系统 prompt（针对数学）
 │   ├── drill.md               # 出综合题 prompt（开放题，{summary_list}）
-│   └── judge.md               # LLM 判对错 prompt
+│   ├── judge.md               # LLM 判对错 prompt
+│   └── ocr.md                 # 数学图片三字段忠实转录 prompt
 ├── tests/                     # 离线自动化回归测试
 ├── install.sh                 # 本地安装脚本
 ├── pyproject.toml
@@ -162,6 +165,12 @@ errgrind/
 2. 用户输入思路概述（多行，必填；确实没有思路时填写「没有思路」）
 3. 用户输入参考答案及解析（多行，可空）
 4. 入库，状态 = `pending-grill`
+
+### `/ocr [图片路径]`
+1. 校验本地图片（PNG、JPEG、WebP，最大 20 MB）
+2. 当前 provider 识别题目、学生思路、参考答案三个字段
+3. 用户逐项校对；题目与思路必填，参考答案可空
+4. 仅保存确认后的文本，状态 = `pending-grill`；取消或失败不入库
 
 ### `/resume`
 1. 打开全屏双栏工作台：左侧为 error 列表，右侧为当前 error 的摘要、思路与 grilling 摘要
@@ -198,6 +207,7 @@ CREATE TABLE error_records (
 ```
 
 ## Prompt 文件
+- `ocr.md` — 数学错题图片转录 prompt（严格区分题目、学生思路、参考答案）
 - `grilling.md` — Socratic 审讯系统 prompt（针对数学，结束标记 `[GRILLING_END]`）
   - 占位符：`{question}`, `{user_thoughts}`, `{reference_answer}`
 - `teach.md` — 讲解 + Q&A 系统 prompt（针对数学）
@@ -250,6 +260,7 @@ errgrind
 errgrind
 # 在 CLI 内测试：
 /record        # 录入 error
+/ocr <图片路径> # OCR 识别、校对并录入 error
 /resume        # 双栏工作台 → grill / teach / 删除
 /status        # 查看计数
 /drill         # 出综合题
@@ -266,7 +277,7 @@ errgrind
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-当前 25 项测试覆盖：prompt 模板格式化、Markdown / LaTeX 终端渲染、Grill 结束标记、OpenAI 兼容接口与 Gemini SSE 流式输出、数据库路径迁移、Error 状态机、删除、`/record` 必填思路、Grill / Teach 会话恢复，以及 `/drill` 答对/答错分支。
+当前 59 项测试覆盖：prompt 模板格式化、Markdown / LaTeX 终端渲染、Grill 结束标记、OpenAI 兼容接口与 Gemini SSE 流式输出、数据库路径迁移、Error 状态机、删除、`/record` 必填思路、OCR 图片校验与 provider 请求格式、OCR 校对/取消、Codex provider、Grill / Teach 会话恢复、严格 JSON schema，以及 `/drill` 答对/答错分支。
 
 ---
 

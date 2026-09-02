@@ -28,6 +28,89 @@ COMMANDS: dict = {}
 COMMAND_DESCRIPTIONS: dict[str, str] = {}
 
 
+DRILL_SPEC_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "source_error_number": {"type": "integer"},
+        "target_pattern": {
+            "type": "object",
+            "properties": {
+                key: {"type": "string"}
+                for key in (
+                    "mechanism",
+                    "trigger",
+                    "failure_behavior",
+                    "desired_behavior",
+                    "success_signal",
+                )
+            },
+            "required": [
+                "mechanism",
+                "trigger",
+                "failure_behavior",
+                "desired_behavior",
+                "success_signal",
+            ],
+            "additionalProperties": False,
+        },
+        "new_problem": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string"},
+                "task_type": {"type": "string"},
+                "setting": {"type": "string"},
+                "task_goal": {"type": "string"},
+                "essential_trigger": {"type": "string"},
+                "solution_strategy": {"type": "string"},
+                "avoid": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": [
+                "domain",
+                "task_type",
+                "setting",
+                "task_goal",
+                "essential_trigger",
+                "solution_strategy",
+                "avoid",
+            ],
+            "additionalProperties": False,
+        },
+        "difficulty": {
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer"},
+                "reasoning_depth": {"type": "integer"},
+                "calculation_load": {"type": "integer"},
+            },
+            "required": ["level", "reasoning_depth", "calculation_load"],
+            "additionalProperties": False,
+        },
+    },
+    "required": ["source_error_number", "target_pattern", "new_problem", "difficulty"],
+    "additionalProperties": False,
+}
+
+DRILL_DRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "reference_answer": {"type": "string"},
+    },
+    "required": ["question", "reference_answer"],
+    "additionalProperties": False,
+}
+
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_correct": {"type": "boolean"},
+        "feedback": {"type": "string"},
+    },
+    "required": ["is_correct", "feedback"],
+    "additionalProperties": False,
+}
+
+
 def _register(name, description, aliases=None):
     aliases = aliases or []
     COMMAND_DESCRIPTIONS[name] = description
@@ -261,6 +344,73 @@ def _cmd_record(state, arg):
     sysmsg("输入 /resume 开始处理错题")
 
 
+@_register("ocr", "从图片识别并记录一个 error")
+def _cmd_ocr(state, arg):
+    image_path = arg.strip() if arg and arg.strip() else popup_input(
+        "📷 OCR 录题",
+        "请输入数学错题图片路径（支持 PNG、JPEG、WebP，最大 20 MB；图片会发送给当前 AI provider）：",
+        multiline=False,
+    )
+    if not image_path or not image_path.strip():
+        sysmsg("OCR 录题已取消")
+        return
+
+    ocr_image = getattr(state.llm, "ocr_image", None)
+    if not callable(ocr_image):
+        errmsg("当前 AI provider 不支持图片 OCR，请在 /config 中切换 provider")
+        return
+
+    try:
+        prompt = state.prompts.load("ocr.md")
+        with console.status("[bold cyan]🔎 正在识别数学题图片...[/bold cyan]", spinner="dots"):
+            extracted = ocr_image(image_path.strip(), prompt)
+    except (KeyboardInterrupt, EOFError):
+        sysmsg("OCR 录题已取消")
+        return
+    except Exception as exc:
+        errmsg(f"OCR 失败: {exc}")
+        return
+
+    question = popup_input(
+        "📷 OCR 校对 (1/3)",
+        "请校对题目；可以直接修改识别错误：",
+        initial_text=extracted.get("question", ""),
+    )
+    if not question or not question.strip():
+        sysmsg("OCR 录题已取消，未写入错题库")
+        return
+
+    while True:
+        user_thoughts = popup_input(
+            "📷 OCR 校对 (2/3)",
+            "请校对你的原始思路；图片中没有思路时填写「没有思路」：",
+            initial_text=extracted.get("user_thoughts", ""),
+        )
+        if user_thoughts is None:
+            sysmsg("OCR 录题已取消，未写入错题库")
+            return
+        if user_thoughts.strip():
+            break
+        errmsg("用户思路不能为空，请描述你当时是怎么想的")
+
+    reference_answer = popup_input(
+        "📷 OCR 校对 (3/3)",
+        "请校对参考答案；图片中没有时可留空：",
+        initial_text=extracted.get("reference_answer", ""),
+    )
+    if reference_answer is None:
+        sysmsg("OCR 录题已取消，未写入错题库")
+        return
+
+    error_id = state.db.create_error(
+        question=question.strip(),
+        user_thoughts=user_thoughts.strip(),
+        reference_answer=reference_answer.strip() or None,
+    )
+    successmsg(f"OCR 校对完成，已录入错题库 (Error #{error_id})")
+    sysmsg("输入 /resume 开始处理错题")
+
+
 @_register("resume", "查看/处理 error（双栏工作台 → grill/teach）")
 def _cmd_resume(state, arg):
     while True:
@@ -293,7 +443,11 @@ def _cmd_resume(state, arg):
 def _source_leak_terms(source_text):
     folded = source_text.casefold()
     terms = set(re.findall(r"[a-z_][a-z0-9_]{3,}", folded))
-    math_names = {
+    generic_terms = {
+        "error",
+        "pattern",
+        "student",
+        "grill",
         "sin",
         "cos",
         "tan",
@@ -303,7 +457,10 @@ def _source_leak_terms(source_text):
         "log",
         "sqrt",
     }
-    terms.update(name for name in re.findall(r"[a-z]+", folded) if name in math_names)
+    # These describe the workflow or a broad mathematical operation.  They
+    # are not source-specific fingerprints and may legitimately reappear in
+    # a transfer problem ("pattern" also occurs in the JSON field name).
+    terms.difference_update(generic_terms)
     terms.update(re.findall(r"\d{2,}(?:\.\d+)?", folded))
     terms.update(re.findall(r"[\u3400-\u9fff]{4,}", folded))
     for expression in re.findall(r"[a-z0-9_+\-*/^=().°√]+", folded):
@@ -437,7 +594,7 @@ def _request_drill_spec(state, error_context, source_records):
     messages = [{"role": "user", "content": prompt}]
 
     for attempt in range(3):
-        raw_spec = state.llm.chat_json(messages)
+        raw_spec = state.llm.chat_json(messages, output_schema=DRILL_SPEC_SCHEMA)
         try:
             return _normalize_drill_spec(raw_spec, source_records)
         except (KeyError, TypeError, ValueError) as validation_error:
@@ -463,7 +620,7 @@ def _generate_drill(state, drill_spec):
     messages = [{"role": "user", "content": prompt}]
 
     for attempt in range(2):
-        result = state.llm.chat_json(messages)
+        result = state.llm.chat_json(messages, output_schema=DRILL_DRAFT_SCHEMA)
         try:
             question = _required_text(result, "question", "出题结果")
             reference_answer = _required_text(
@@ -527,7 +684,10 @@ def _cmd_drill(state, arg):
         success_signal=drill_spec["target_pattern"]["success_signal"],
     )
     try:
-        judgment = state.llm.chat_json([{"role": "user", "content": judge_prompt}])
+        judgment = state.llm.chat_json(
+            [{"role": "user", "content": judge_prompt}],
+            output_schema=JUDGE_SCHEMA,
+        )
     except Exception as e:
         errmsg(f"判分失败: {e}")
         return
@@ -711,6 +871,7 @@ def _cmd_help(state, arg):
     groups = [
         ("📝 错题与演练工作流", [
             ("/record", "录入一个新的 error (进入 pending-grill)"),
+            ("/ocr [路径]", "识别图片，校对后录入 error"),
             ("/resume", "打开双栏工作台 (进行 grill 审讯 / teach 讲解)"),
             ("/drill", "结合近期 error 生成综合演练测试题"),
         ]),

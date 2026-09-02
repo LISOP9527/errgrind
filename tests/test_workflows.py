@@ -6,9 +6,11 @@ from unittest.mock import patch
 
 from errgrind.cli.commands import (
     _cmd_drill,
+    _cmd_ocr,
     _cmd_record,
     _run_grilling,
     _run_teaching,
+    _source_leak_terms,
 )
 from errgrind.cli.state import AppState
 from errgrind.db.ops import Database
@@ -81,7 +83,7 @@ class _FakeLLM:
         self.fail_on_call = fail_on_call
         self.prompts = []
 
-    def chat_json(self, messages):
+    def chat_json(self, messages, **_kwargs):
         self.prompts.append("\n".join(message["content"] for message in messages))
         if len(self.prompts) == self.fail_on_call:
             raise RuntimeError("模拟 API 错误")
@@ -166,6 +168,17 @@ class DrillWorkflowTests(unittest.TestCase):
         self.assertEqual(len(self.db.list_all_errors()), 1)
         answer_popup.assert_called_once_with("新的练习题")
         result_popup.assert_called_once()
+
+    def test_source_leak_terms_ignore_workflow_words_and_math_functions(self):
+        terms = _source_leak_terms(
+            "Error Pattern: student used sqrt and forgot SOURCE_ONLY_7F31"
+        )
+
+        self.assertNotIn("error", terms)
+        self.assertNotIn("pattern", terms)
+        self.assertNotIn("student", terms)
+        self.assertNotIn("sqrt", terms)
+        self.assertIn("source_only_7f31", terms)
 
     def test_wrong_answer_is_saved_as_new_error(self):
         llm = _FakeLLM([
@@ -352,6 +365,59 @@ class RecordWorkflowTests(unittest.TestCase):
         self.assertIsNone(records[0].reference_answer)
         self.assertEqual(error_message.call_count, 2)
         self.assertEqual(popup.call_count, 5)
+
+    def test_ocr_prefills_review_and_saves_edited_text(self):
+        class OcrLLM:
+            def ocr_image(self, path, prompt):
+                self.path = path
+                self.prompt = prompt
+                return {
+                    "question": "识别题目",
+                    "user_thoughts": "识别思路",
+                    "reference_answer": "识别答案",
+                }
+
+        llm = OcrLLM()
+        self.state.llm = llm
+        self.state.prompts = PromptManager()
+        with (
+            patch(
+                "errgrind.cli.commands.popup_input",
+                side_effect=["校对后的题目", "校对后的思路", "校对后的答案"],
+            ) as popup,
+            patch("errgrind.cli.commands.successmsg"),
+            patch("errgrind.cli.commands.sysmsg"),
+        ):
+            _cmd_ocr(self.state, "/tmp/problem.png")
+
+        record = self.db.list_all_errors()[0]
+        self.assertEqual(record.question, "校对后的题目")
+        self.assertEqual(record.user_thoughts, "校对后的思路")
+        self.assertEqual(record.reference_answer, "校对后的答案")
+        self.assertEqual(llm.path, "/tmp/problem.png")
+        self.assertIn("数学错题图片转录器", llm.prompt)
+        self.assertEqual(popup.call_args_list[0].kwargs["initial_text"], "识别题目")
+        self.assertEqual(popup.call_args_list[1].kwargs["initial_text"], "识别思路")
+        self.assertEqual(popup.call_args_list[2].kwargs["initial_text"], "识别答案")
+
+    def test_ocr_cancel_during_review_does_not_write(self):
+        class OcrLLM:
+            def ocr_image(self, path, prompt):
+                return {
+                    "question": "识别题目",
+                    "user_thoughts": "",
+                    "reference_answer": "",
+                }
+
+        self.state.llm = OcrLLM()
+        self.state.prompts = PromptManager()
+        with (
+            patch("errgrind.cli.commands.popup_input", return_value=None),
+            patch("errgrind.cli.commands.sysmsg"),
+        ):
+            _cmd_ocr(self.state, "/tmp/problem.png")
+
+        self.assertEqual(self.db.list_all_errors(), [])
 
 
 class _ConversationLLM:

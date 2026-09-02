@@ -8,6 +8,17 @@ from unittest.mock import patch
 from errgrind.cli import app
 from errgrind.config import DEFAULT_CODEX_MODEL, load
 from errgrind.llm.codex import CodexClient
+from errgrind.llm.ocr import OCR_OUTPUT_SCHEMA
+
+
+class FakeTextInput:
+    def __init__(self, text):
+        self.text = text
+
+
+class FakeLocalImageInput:
+    def __init__(self, path):
+        self.path = path
 
 
 class FakeTurn:
@@ -67,7 +78,14 @@ class FakeSDK:
 
 
 class CodexProviderTests(unittest.TestCase):
-    SDK_TYPES = (None, None, SimpleNamespace(deny_all="deny"), SimpleNamespace(read_only="read"))
+    SDK_TYPES = (
+        None,
+        None,
+        SimpleNamespace(deny_all="deny"),
+        SimpleNamespace(read_only="read"),
+        FakeTextInput,
+        FakeLocalImageInput,
+    )
 
     def test_chat_uses_read_only_and_denies_approvals(self):
         sdk = FakeSDK(FakeThread())
@@ -98,9 +116,24 @@ class CodexProviderTests(unittest.TestCase):
         sdk = FakeSDK(Thread())
         client = CodexClient(sdk=sdk, max_retries=2)
         self.addCleanup(client.close)
+        schema = {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        }
         with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES), patch("errgrind.llm.codex.time.sleep"):
+            self.assertEqual(client.chat_json([], output_schema=schema), {"ok": True})
+        self.assertEqual(sdk.thread.run_calls[0][1]["output_schema"], schema)
+
+    def test_generic_json_does_not_send_an_invalid_wildcard_schema(self):
+        sdk = FakeSDK(FakeThread(text='{"ok": true}'))
+        client = CodexClient(sdk=sdk)
+        self.addCleanup(client.close)
+        with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
             self.assertEqual(client.chat_json([]), {"ok": True})
-        self.assertIn("output_schema", sdk.thread.run_calls[0][1])
+
+        self.assertNotIn("output_schema", sdk.thread.run_calls[0][1])
 
     def test_keyboard_interrupt_requests_turn_interrupt(self):
         class InterruptingTurn(FakeTurn):
@@ -120,6 +153,36 @@ class CodexProviderTests(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 client.chat([{"role": "user", "content": "hi"}])
         self.assertTrue(sdk.thread.turn_handle.interrupted)
+
+    def test_ocr_uses_local_image_and_structured_output(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "problem.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            thread = FakeThread(
+                text=json.dumps(
+                    {
+                        "question": "求 $x$",
+                        "user_thoughts": "移项",
+                        "reference_answer": "$x=2$",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            sdk = FakeSDK(thread)
+            client = CodexClient(sdk=sdk)
+            self.addCleanup(client.close)
+
+            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
+                result = client.ocr_image(str(image_path), "OCR prompt")
+
+        self.assertEqual(result["question"], "求 $x$")
+        turn_input, turn_kwargs = thread.run_calls[0]
+        self.assertIsInstance(turn_input[0], FakeTextInput)
+        self.assertIsInstance(turn_input[1], FakeLocalImageInput)
+        self.assertEqual(turn_input[1].path, str(image_path.resolve()))
+        self.assertEqual(turn_kwargs["output_schema"], OCR_OUTPUT_SCHEMA)
+        self.assertEqual(sdk.calls[0]["sandbox"], "read")
+        self.assertEqual(sdk.calls[0]["approval_mode"], "deny")
 
     def test_auth_helpers_delegate_to_sdk(self):
         sdk = FakeSDK(FakeThread())

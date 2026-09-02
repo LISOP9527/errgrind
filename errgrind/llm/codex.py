@@ -14,20 +14,29 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .ocr import OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result
+
 
 class CodexError(Exception):
     """User-facing error raised by the Codex provider."""
 
 
-def _load_sdk() -> tuple[Any, Any, Any, Any]:
+def _load_sdk() -> tuple[Any, Any, Any, Any, Any, Any]:
     try:
-        from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+        from openai_codex import (
+            ApprovalMode,
+            Codex,
+            CodexConfig,
+            LocalImageInput,
+            Sandbox,
+            TextInput,
+        )
     except ImportError as exc:  # pragma: no cover - depends on installation
         raise CodexError(
             "Codex provider 需要官方 openai-codex SDK 和匹配的 runtime；"
             "请在项目目录重新运行 bash install.sh。"
         ) from exc
-    return Codex, CodexConfig, ApprovalMode, Sandbox
+    return Codex, CodexConfig, ApprovalMode, Sandbox, TextInput, LocalImageInput
 
 
 def _text_from_event(event: Any) -> str:
@@ -67,7 +76,14 @@ class CodexClient:
         self._closed = False
         if sdk is None:
             try:
-                Codex, CodexConfig, _ApprovalMode, _Sandbox = _load_sdk()
+                (
+                    Codex,
+                    CodexConfig,
+                    _ApprovalMode,
+                    _Sandbox,
+                    _TextInput,
+                    _LocalImageInput,
+                ) = _load_sdk()
                 # Let the official SDK resolve its matching bundled runtime;
                 # accepting an explicit binary is useful for controlled test
                 # or deployment environments without silently mixing CLI
@@ -131,7 +147,7 @@ class CodexClient:
         return "\n\n".join(system), prompt
 
     def _new_thread(self, messages: list[dict]) -> Any:
-        _Codex, _Config, ApprovalMode, Sandbox = _load_sdk()
+        _Codex, _Config, ApprovalMode, Sandbox, _TextInput, _LocalImageInput = _load_sdk()
         instructions, prompt = self._prompt(messages)
         kwargs: dict[str, Any] = {
             "base_instructions": instructions or None,
@@ -146,6 +162,56 @@ class CodexClient:
             "approval_mode": ApprovalMode.deny_all,
         }
         return self._sdk.thread_start(**kwargs), prompt
+
+    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
+        """Transcribe one local image through the official image input API."""
+        payload = load_image(image_path)
+        (
+            _Codex,
+            _Config,
+            ApprovalMode,
+            Sandbox,
+            TextInput,
+            LocalImageInput,
+        ) = _load_sdk()
+        last: Exception | None = None
+        for attempt in range(self.max_retries):
+            turn = None
+            try:
+                thread = self._sdk.thread_start(
+                    base_instructions=prompt,
+                    developer_instructions=(
+                        "你只执行图片转录。不要调用工具、执行命令、访问网络或修改文件。"
+                        "不得根据常识补全图片中不可见的内容。"
+                    ),
+                    cwd=os.fspath(self._workspace.name),
+                    ephemeral=True,
+                    model=self.model,
+                    sandbox=Sandbox.read_only,
+                    approval_mode=ApprovalMode.deny_all,
+                )
+                turn = thread.turn(
+                    [
+                        TextInput("请按照系统规则转录这张数学错题图片。"),
+                        LocalImageInput(payload.path),
+                    ],
+                    model=self.model,
+                    output_schema=OCR_OUTPUT_SCHEMA,
+                )
+                result = turn.run()
+                return parse_ocr_result(_result_text(result))
+            except KeyboardInterrupt:
+                if turn is not None:
+                    try:
+                        turn.interrupt()
+                    except Exception:
+                        pass
+                raise
+            except Exception as exc:
+                last = exc
+            if attempt + 1 < self.max_retries:
+                time.sleep(2**attempt)
+        raise CodexError(f"Codex OCR 调用失败: {last}") from last
 
     def chat(self, messages: list[dict], **kwargs: Any) -> str:
         last: Exception | None = None
@@ -203,13 +269,12 @@ class CodexClient:
         raise CodexError(f"Codex 调用失败: {last}") from last
 
     def chat_json(self, messages: list[dict], **kwargs: Any) -> dict:
-        kwargs.setdefault(
-            "output_schema",
-            {
-                "type": "object",
-                "additionalProperties": True,
-            },
-        )
+        # Codex structured output requires a fully strict schema.  Callers
+        # with a known contract pass one; generic JSON calls rely on the
+        # prompt plus the local parse/retry guard below.
+        output_schema = kwargs.pop("output_schema", None)
+        if output_schema is not None:
+            kwargs["output_schema"] = output_schema
         retry_messages = list(messages)
         last_text = ""
         last_error: Exception | None = None
