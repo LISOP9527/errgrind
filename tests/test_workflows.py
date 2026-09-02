@@ -109,8 +109,36 @@ class DatabaseWorkflowTests(unittest.TestCase):
             }
             self.assertIn("source_error_id", columns)
             self.assertIn("derived_error_id", columns)
+            self.assertEqual(
+                migrated.conn.execute("PRAGMA user_version").fetchone()[0],
+                1,
+            )
         finally:
             migrated.close()
+
+    def test_newer_database_version_is_rejected_before_migration(self):
+        path = Path(self.temp_dir.name) / "future.db"
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA user_version = 999")
+        conn.execute("CREATE TABLE future_only (value TEXT)")
+        conn.commit()
+        conn.close()
+
+        with self.assertRaisesRegex(RuntimeError, "数据库版本 999"):
+            Database(str(path))
+
+        check = sqlite3.connect(path)
+        try:
+            tables = {
+                row[0]
+                for row in check.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            self.assertEqual(tables, {"future_only"})
+            self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], 999)
+        finally:
+            check.close()
 
     def test_drill_attempt_is_atomic_and_keeps_lineage(self):
         source = self.db.create_error("原题", origin="record")

@@ -16,7 +16,11 @@ class Database:
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
-        create_tables(self.conn)
+        try:
+            create_tables(self.conn)
+        except Exception:
+            self.conn.close()
+            raise
 
     def _row_to_record(self, row) -> ErrorRecord:
         return ErrorRecord(

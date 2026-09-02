@@ -1,3 +1,6 @@
+SCHEMA_VERSION = 1
+
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS error_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +42,13 @@ CREATE INDEX IF NOT EXISTS idx_drill_attempts_source ON drill_attempts(source_er
 
 
 def create_tables(conn):
+    current_version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if current_version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"数据库版本 {current_version} 高于当前程序支持的版本 "
+            f"{SCHEMA_VERSION}，请升级 ErrGrind"
+        )
+
     conn.executescript(SCHEMA_SQL)
     # 旧版单表数据库无 provenance 字段；历史来源必须保持未知，不能推断。
     columns = {row[1] for row in conn.execute("PRAGMA table_info(error_records)")}
@@ -48,4 +58,5 @@ def create_tables(conn):
         conn.execute("ALTER TABLE error_records ADD COLUMN source_error_id INTEGER")
     if "source_drill_attempt_id" not in columns:
         conn.execute("ALTER TABLE error_records ADD COLUMN source_drill_attempt_id INTEGER")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()

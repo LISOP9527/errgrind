@@ -8,6 +8,7 @@ ErrGrind 已能保存 Error 与 Grill/Teach 对话，但原记录无法说明来
 
 - `error_records` 增加 `origin`（`unknown`、`record`、`ocr`、`drill`）、`source_error_id` 与 `source_drill_attempt_id`。旧行统一迁移为 `unknown`，不从文本推断来源。
 - 新增 `drill_attempts`，原子保存选中的 source Error、完整 DrillSpec、题目、作答、判分与可选衍生 Error。
+- 数据库使用 SQLite `user_version` 记录当前 Schema 版本；旧程序遇到更高版本时必须停止写入并提示升级。
 - Drill 正确和错误都记录为 Action 结果；取消、API 失败和非法判分不写结果。
 - 删除 Error 时清除其子 Error 的结构化来源字段，并删除直接关联的 Drill ledger，明确表示来源已不可追溯。
 
