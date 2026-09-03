@@ -1,11 +1,16 @@
-import hashlib
 import json
-import re
 
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
+from ..application import (
+    DrillStage,
+    GrillState,
+    InvalidWorkflowState,
+    NoDrillContext,
+    WorkflowModelError,
+)
 from .state import AppState
 from .ui import (
     console,
@@ -27,89 +32,6 @@ from .ui import (
 
 COMMANDS: dict = {}
 COMMAND_DESCRIPTIONS: dict[str, str] = {}
-
-
-DRILL_SPEC_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "source_error_number": {"type": "integer"},
-        "target_pattern": {
-            "type": "object",
-            "properties": {
-                key: {"type": "string"}
-                for key in (
-                    "mechanism",
-                    "trigger",
-                    "failure_behavior",
-                    "desired_behavior",
-                    "success_signal",
-                )
-            },
-            "required": [
-                "mechanism",
-                "trigger",
-                "failure_behavior",
-                "desired_behavior",
-                "success_signal",
-            ],
-            "additionalProperties": False,
-        },
-        "new_problem": {
-            "type": "object",
-            "properties": {
-                "domain": {"type": "string"},
-                "task_type": {"type": "string"},
-                "setting": {"type": "string"},
-                "task_goal": {"type": "string"},
-                "essential_trigger": {"type": "string"},
-                "solution_strategy": {"type": "string"},
-                "avoid": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": [
-                "domain",
-                "task_type",
-                "setting",
-                "task_goal",
-                "essential_trigger",
-                "solution_strategy",
-                "avoid",
-            ],
-            "additionalProperties": False,
-        },
-        "difficulty": {
-            "type": "object",
-            "properties": {
-                "level": {"type": "integer"},
-                "reasoning_depth": {"type": "integer"},
-                "calculation_load": {"type": "integer"},
-            },
-            "required": ["level", "reasoning_depth", "calculation_load"],
-            "additionalProperties": False,
-        },
-    },
-    "required": ["source_error_number", "target_pattern", "new_problem", "difficulty"],
-    "additionalProperties": False,
-}
-
-DRILL_DRAFT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "question": {"type": "string"},
-        "reference_answer": {"type": "string"},
-    },
-    "required": ["question", "reference_answer"],
-    "additionalProperties": False,
-}
-
-JUDGE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "is_correct": {"type": "boolean"},
-        "feedback": {"type": "string"},
-    },
-    "required": ["is_correct", "feedback"],
-    "additionalProperties": False,
-}
 
 
 def _register(name, description, aliases=None):
@@ -138,29 +60,6 @@ def _show_context_recap(conversation_json: str, last_n: int = 3):
         console.print("[dim] ──────────────────────────────────────────────────────[/dim]")
 
 
-def _llm_chat(messages, llm):
-    stream_chat = getattr(llm, "stream_chat", None)
-    if not callable(stream_chat):
-        with console.status("[bold cyan]🧠 导师思考中...", spinner="dots"):
-            return llm.chat(messages)
-
-    collected = []
-    with Live(Text("🧠 导师思考中..."), refresh_per_second=15, transient=True) as live:
-        def on_token(token: str):
-            collected.append(token)
-            live.update(render_terminal_markdown("".join(collected)))
-
-        return stream_chat(messages, on_token)
-
-
-def _is_grilling_complete(response: str) -> bool:
-    return response.strip().endswith("[GRILLING_END]")
-
-
-def _grilling_summary(response: str) -> str:
-    return response.strip()[: -len("[GRILLING_END]")].strip()
-
-
 def _show_grilling_record(error):
     messages = json.loads(error.grilling_conversation or "[]")
     body = []
@@ -180,132 +79,109 @@ def _show_grilling_record(error):
     popup_content(body, title=f"Error #{error.id} - Grilling 记录")
 
 
+def _run_grill_call(state: AppState, operation):
+    """Keep Rich streaming at the adapter boundary while Core owns the call."""
+    if not callable(getattr(state.llm, "stream_chat", None)):
+        with console.status("[bold cyan]🧠 导师思考中...", spinner="dots"):
+            return operation()
+    collected = []
+    with Live(Text("🧠 导师思考中..."), refresh_per_second=15, transient=True) as live:
+        def on_token(token: str):
+            collected.append(token)
+            live.update(render_terminal_markdown("".join(collected)))
+
+        return operation(on_token=on_token)
+
+
+def _render_grill_response(result):
+    if result.assistant_response is not None:
+        console.print(Panel(
+            render_terminal_markdown(result.assistant_response),
+            title="[bold cyan]🧠 导师 (Grill)[/bold cyan]",
+            border_style="cyan", padding=(1, 2),
+        ))
+
+
 def _run_grilling(state: AppState, error):
+    initial_result = None
     if error.status != "pending-grill":
-        _show_grilling_record(error)
-        return
+        initial_result = state.application().start_or_resume_grill(error.id)
+        if initial_result.state == GrillState.READ_ONLY:
+            _show_grilling_record(initial_result.error)
+            return
 
-    system_prompt = state.prompts.load("grilling.md").format(
-        question=error.question,
-        user_thoughts=error.user_thoughts or "",
-        reference_answer=error.reference_answer or "",
-    )
-
-    has_conversation = bool(error.grilling_conversation)
-    messages = json.loads(error.grilling_conversation) if has_conversation else [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "开始吧"},
-    ]
-
-    if has_conversation and error.id not in state.accessed_error_ids:
+    if error.grilling_conversation and error.id not in state.accessed_error_ids:
         state.accessed_error_ids.add(error.id)
         _show_context_recap(error.grilling_conversation)
-
-    def _get_ai_response() -> bool | None:
-        try:
-            resp = _llm_chat(messages, state.llm)
-        except Exception as e:
-            errmsg(f"API 错误: {e}")
-            return None
-        complete = _is_grilling_complete(resp)
-        clean_text = _grilling_summary(resp) if complete else resp
-        console.print(Panel(render_terminal_markdown(clean_text), title="[bold cyan]🧠 导师 (Grill)[/bold cyan]", border_style="cyan", padding=(1, 2)))
-        messages.append({"role": "assistant", "content": resp})
-
-        if complete:
-            summary = _grilling_summary(resp)
-            messages[-1]["content"] = summary
-            state.db.update_grilling(error.id, json.dumps(messages, ensure_ascii=False), summary)
+    try:
+        result = initial_result or _run_grill_call(
+            state,
+            lambda **kwargs: state.application().start_or_resume_grill(
+                error.id, **kwargs
+            ),
+        )
+        if result.state == GrillState.READ_ONLY:
+            _show_grilling_record(result.error)
+            return
+        _render_grill_response(result)
+        if result.state == GrillState.COMPLETE:
             successmsg("Grilling 思维审讯完成！状态已更新为待讲解")
             if popup_confirm("Grilling 已完成，是否立即开始讲解？"):
-                refreshed_error = state.db.get_error(error.id)
-                if refreshed_error is not None:
-                    _run_teaching(state, refreshed_error)
-        return complete
-
-    try:
-        if not has_conversation or (messages and messages[-1]["role"] == "user"):
-            complete = _get_ai_response()
-            if complete is None or complete:
-                return
+                _run_teaching(state, result.error)
+            return
 
         max_turns = state.cfg.get("grill_max_turns", 30)
         for _ in range(max_turns):
             reply = multiline_input("[bold cyan]👤 你的回答[/bold cyan]")
-            messages.append({"role": "user", "content": reply})
-
-            complete = _get_ai_response()
-            if complete is None:
-                state.db.save_grilling_conversation(error.id, json.dumps(messages, ensure_ascii=False))
-                state.db.set_status(error.id, "pending-grill")
+            result = _run_grill_call(
+                state,
+                lambda **kwargs: state.application().submit_grill_answer(error.id, reply, **kwargs),
+            )
+            _render_grill_response(result)
+            if result.state == GrillState.COMPLETE:
+                successmsg("Grilling 思维审讯完成！状态已更新为待讲解")
+                if popup_confirm("Grilling 已完成，是否立即开始讲解？"):
+                    _run_teaching(state, result.error)
                 return
-            if complete:
-                return
-        state.db.save_grilling_conversation(error.id, json.dumps(messages, ensure_ascii=False))
-        state.db.set_status(error.id, "pending-grill")
+        state.application().pause_grill(error.id)
         sysmsg("已达到最大对话轮数，对话已保存")
+    except WorkflowModelError as exc:
+        errmsg(str(exc))
+        state.application().pause_grill(error.id)
     except (KeyboardInterrupt, EOFError):
         sysmsg("Grilling 对话已保存（中断）")
-        state.db.save_grilling_conversation(error.id, json.dumps(messages, ensure_ascii=False))
-        state.db.set_status(error.id, "pending-grill")
+        state.application().pause_grill(error.id)
 
 
 def _run_teaching(state: AppState, error):
-    if error.status == "pending-grill" or not error.grilling_conversation:
-        sysmsg("请先进行 grill 审讯分析")
-        return
-
-    messages = json.loads(error.teach_conversation or "[]")
     if error.teach_conversation:
         _show_context_recap(error.teach_conversation)
 
-    if not messages:
-        history = "\n".join(
-            f"{'导师' if m['role'] == 'assistant' else '学生'}：{m['content']}"
-            for m in json.loads(error.grilling_conversation) if m["role"] != "system"
-        )
-
-        system_prompt = state.prompts.load("teach.md").format(
-            question=error.question,
-            user_thoughts=error.user_thoughts or "",
-            reference_answer=error.reference_answer or "",
-            grilling_history=history,
-        )
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "请开始讲解"},
-        ]
+    def show_thinking() -> None:
+        console.print("[dim]🧠 导师思考中...[/dim]")
 
     try:
-        if messages[-1]["role"] == "user":
+        result = state.application().start_or_resume_teach(
+            error.id, before_model_call=show_thinking
+        )
+        if result.assistant_response is not None:
             title = "[bold green]📖 针对性讲解 (Teach)[/bold green]"
             if error.teach_conversation:
                 title = "[bold green]📖 针对性解答[/bold green]"
-            console.print("[dim]🧠 导师思考中...[/dim]")
-            try:
-                resp = state.llm.chat(messages)
-            except Exception as e:
-                errmsg(f"API 错误: {e}")
-                state.db.save_teach_conversation(error.id, json.dumps(messages, ensure_ascii=False))
-                return
-            console.print(Panel(render_terminal_markdown(resp), title=title, border_style="green", padding=(1, 2)))
-            messages.append({"role": "assistant", "content": resp})
+            console.print(Panel(render_terminal_markdown(result.assistant_response), title=title, border_style="green", padding=(1, 2)))
 
         while True:
             reply = multiline_input("[bold green]💬 提问/讨论（Ctrl+C 保存并退出）[/bold green]")
-            messages.append({"role": "user", "content": reply})
-            console.print("[dim]🧠 导师思考中...[/dim]")
-            try:
-                resp = state.llm.chat(messages)
-            except Exception as e:
-                errmsg(f"API 错误: {e}")
-                state.db.save_teach_conversation(error.id, json.dumps(messages, ensure_ascii=False))
-                return
-            console.print(Panel(render_terminal_markdown(resp), title="[bold green]📖 针对性解答[/bold green]", border_style="green", padding=(1, 2)))
-            messages.append({"role": "assistant", "content": resp})
+            result = state.application().submit_teach_answer(
+                error.id, reply, before_model_call=show_thinking
+            )
+            console.print(Panel(render_terminal_markdown(result.assistant_response), title="[bold green]📖 针对性解答[/bold green]", border_style="green", padding=(1, 2)))
+    except InvalidWorkflowState as exc:
+        sysmsg(str(exc))
+    except WorkflowModelError as exc:
+        errmsg(str(exc))
     except (KeyboardInterrupt, EOFError):
-        state.db.update_teach(error.id, json.dumps(messages, ensure_ascii=False))
+        state.application().finish_teach(error.id)
         successmsg("讲解对话已保存，可随时继续")
 
 
@@ -417,7 +293,7 @@ def _cmd_ocr(state, arg):
 @_register("resume", "查看/处理 error（双栏工作台 → grill/teach）")
 def _cmd_resume(state, arg):
     while True:
-        errors = state.db.list_all_errors()
+        errors = state.application().list_errors()
         if not errors:
             sysmsg("暂无 error 记录，用 /record 添加")
             return
@@ -426,7 +302,7 @@ def _cmd_resume(state, arg):
         if idx is None or action is None:
             return
 
-        error = state.db.get_error(errors[idx].id)
+        error = state.application().get_error(errors[idx].id)
         if error is None:
             continue
 
@@ -439,305 +315,40 @@ def _cmd_resume(state, arg):
         elif action == "d":
             confirmed = popup_confirm(f"确认删除 Error #{idx + 1}？")
             if confirmed:
-                state.db.delete_error(error.id)
+                state.application().delete_error(error.id)
                 successmsg(f"Error #{idx + 1} 已从错题库删除")
-
-
-def _source_leak_terms(source_text):
-    folded = source_text.casefold()
-    terms = set(re.findall(r"[a-z_][a-z0-9_]{3,}", folded))
-    generic_terms = {
-        "error",
-        "pattern",
-        "student",
-        "grill",
-        "sin",
-        "cos",
-        "tan",
-        "cot",
-        "sec",
-        "csc",
-        "log",
-        "sqrt",
-    }
-    # These describe the workflow or a broad mathematical operation.  They
-    # are not source-specific fingerprints and may legitimately reappear in
-    # a transfer problem ("pattern" also occurs in the JSON field name).
-    terms.difference_update(generic_terms)
-    terms.update(re.findall(r"\d{2,}(?:\.\d+)?", folded))
-    terms.update(re.findall(r"[\u3400-\u9fff]{4,}", folded))
-    for expression in re.findall(r"[a-z0-9_+\-*/^=().°√]+", folded):
-        if len(expression) >= 6 and any(op in expression for op in "+-*/^="):
-            terms.add(expression)
-    return terms
-
-
-def _required_text(data, key, label):
-    value = data[key]
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label}字段 {key} 必须是非空文本")
-    return value.strip()
-
-
-def _required_text_list(data, key, label):
-    value = data[key]
-    if not isinstance(value, list) or any(
-        not isinstance(item, str) or not item.strip() for item in value
-    ):
-        raise ValueError(f"{label}字段 {key} 必须是文本列表")
-    return [item.strip() for item in value]
-
-
-def _bounded_int(data, key, label, minimum=1, maximum=5):
-    value = data[key]
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{label}字段 {key} 必须是整数")
-    if not minimum <= value <= maximum:
-        raise ValueError(f"{label}字段 {key} 必须在 {minimum}–{maximum} 之间")
-    return value
-
-
-def _normalize_drill_spec(raw_spec, source_records):
-    if not isinstance(raw_spec, dict):
-        raise ValueError("DrillSpec 必须是 JSON 对象")
-
-    source_number = raw_spec["source_error_number"]
-    if isinstance(source_number, bool) or not isinstance(source_number, int):
-        raise ValueError("source_error_number 必须是整数")
-    if not 1 <= source_number <= len(source_records):
-        raise ValueError("source_error_number 超出本次 Error 上下文范围")
-    source_index = source_number - 1
-
-    target = raw_spec["target_pattern"]
-    new_problem = raw_spec["new_problem"]
-    difficulty = raw_spec["difficulty"]
-    if not all(isinstance(section, dict) for section in (target, new_problem, difficulty)):
-        raise ValueError("DrillSpec 的分组字段必须是 JSON 对象")
-
-    task_types = {
-        "calculate",
-        "simplify",
-        "solve",
-        "prove",
-        "classify",
-        "construct",
-        "optimize",
-        "explain",
-        "determine_truth",
-    }
-    task_type = _required_text(new_problem, "task_type", "new_problem")
-    if task_type not in task_types:
-        raise ValueError(f"new_problem.task_type 使用了未知枚举值 {task_type}")
-
-    # 只重建第二阶段真正需要的字段，模型返回的其他内容一律丢弃。
-    normalized = {
-        "target_pattern": {
-            "mechanism": _required_text(target, "mechanism", "target_pattern"),
-            "trigger": _required_text(target, "trigger", "target_pattern"),
-            "failure_behavior": _required_text(
-                target, "failure_behavior", "target_pattern"
-            ),
-            "desired_behavior": _required_text(
-                target, "desired_behavior", "target_pattern"
-            ),
-            "success_signal": _required_text(
-                target, "success_signal", "target_pattern"
-            ),
-        },
-        "new_problem": {
-            "domain": _required_text(new_problem, "domain", "new_problem"),
-            "task_type": task_type,
-            "setting": _required_text(new_problem, "setting", "new_problem"),
-            "task_goal": _required_text(new_problem, "task_goal", "new_problem"),
-            "essential_trigger": _required_text(
-                new_problem, "essential_trigger", "new_problem"
-            ),
-            "solution_strategy": _required_text(
-                new_problem, "solution_strategy", "new_problem"
-            ),
-            "avoid": _required_text_list(new_problem, "avoid", "new_problem"),
-        },
-        "difficulty": {
-            "level": _bounded_int(difficulty, "level", "difficulty"),
-            "reasoning_depth": _bounded_int(
-                difficulty, "reasoning_depth", "difficulty"
-            ),
-            "calculation_load": _bounded_int(
-                difficulty, "calculation_load", "difficulty"
-            ),
-        },
-    }
-
-    public_text = json.dumps(normalized, ensure_ascii=False).casefold()
-    comparison_terms = ("原题", "旧题", "历史题", "源题", "原始题目")
-    if any(term in public_text for term in comparison_terms):
-        raise ValueError("公开 DrillSpec 只能正面描述新题，不能引用原题")
-
-    source_texts = [record.question for record in source_records]
-    source_texts.extend(
-        record.grilling_summary
-        for index, record in enumerate(source_records)
-        if index != source_index
-    )
-    leaked_terms = {
-        term
-        for source_text in source_texts
-        for term in _source_leak_terms(source_text)
-        if term in public_text
-    }
-    if leaked_terms:
-        examples = "、".join(sorted(leaked_terms, key=len, reverse=True)[:3])
-        raise ValueError(f"公开 DrillSpec 仍包含源 Error 特征文本: {examples}")
-
-    return normalized, source_index
-
-
-def _request_drill_spec(state, error_context, source_records):
-    prompt = state.prompts.load("drill_spec.md").format(error_context=error_context)
-    messages = [{"role": "user", "content": prompt}]
-
-    for attempt in range(3):
-        raw_spec = state.llm.chat_json(messages, output_schema=DRILL_SPEC_SCHEMA)
-        try:
-            return _normalize_drill_spec(raw_spec, source_records)
-        except (KeyError, TypeError, ValueError) as validation_error:
-            if attempt == 2:
-                raise
-            messages.extend([
-                {"role": "assistant", "content": json.dumps(raw_spec, ensure_ascii=False)},
-                {
-                    "role": "user",
-                    "content": (
-                        f"上次输出不符合 DrillSpec 契约：{validation_error}。"
-                        "修复字段、类型或泄漏问题后重新输出完整 JSON；"
-                        "不要解释修改过程。"
-                    ),
-                },
-            ])
-
-
-def _generate_drill(state, drill_spec):
-    prompt = state.prompts.load("drill.md").format(
-        drill_spec=json.dumps(drill_spec, ensure_ascii=False, indent=2)
-    )
-    messages = [{"role": "user", "content": prompt}]
-
-    for attempt in range(2):
-        result = state.llm.chat_json(messages, output_schema=DRILL_DRAFT_SCHEMA)
-        try:
-            question = _required_text(result, "question", "出题结果")
-            reference_answer = _required_text(
-                result, "reference_answer", "出题结果"
-            )
-            return question, reference_answer
-        except (KeyError, TypeError, ValueError) as contract_error:
-            if attempt == 1:
-                raise ValueError(f"生成题目失败: {contract_error}") from contract_error
-            messages.extend([
-                {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)},
-                {
-                    "role": "user",
-                    "content": (
-                        f"上次出题结果不符合输出契约：{contract_error}。"
-                        "只重新输出包含非空 question 和 reference_answer 的完整 JSON。"
-                    ),
-                },
-            ])
 
 
 @_register("drill", "出综合练习题")
 def _cmd_drill(state, arg):
-    n = state.cfg.get("drill_context_n", 10)
-    context = state.db.get_drill_context(n)
+    def show_stage(stage: DrillStage) -> None:
+        if stage == DrillStage.SPEC:
+            sysmsg("🧠 正在从近期 Error 中提炼出题规格...")
+        elif stage == DrillStage.DRAFT:
+            sysmsg("🧩 正在根据出题规格生成新题...")
 
-    if not context:
-        sysmsg("暂无可用于出题的 error，请先通过 /resume 完成至少一条 error 的 grilling")
-        return
-
-    error_context = "\n\n".join(
-        f"[Error {i+1}]\n[原题]\n{item.question}\n[Grill 摘要]\n{item.grilling_summary}"
-        for i, item in enumerate(context)
-    )
-
-    sysmsg("🧠 正在从近期 Error 中提炼出题规格...")
     try:
-        drill_spec, source_index = _request_drill_spec(state, error_context, context)
-    except Exception as e:
-        errmsg(f"提炼出题规格失败: {e}")
+        preparation = state.application().prepare_drill(on_stage=show_stage)
+    except NoDrillContext as exc:
+        sysmsg(str(exc))
+        return
+    except Exception as exc:
+        errmsg(str(exc))
         return
 
-    sysmsg("🧩 正在根据出题规格生成新题...")
-    try:
-        question, reference_answer = _generate_drill(state, drill_spec)
-    except Exception as e:
-        errmsg(str(e))
-        return
-
-    user_response = popup_drill_answer(question)
+    user_response = popup_drill_answer(preparation.question)
     if not user_response:
         sysmsg("已取消作答")
         return
 
     sysmsg("⚖️ 判分评估中...")
-    judge_template = state.prompts.load("judge.md")
-    judge_prompt = judge_template.format(
-        question=question,
-        reference_answer=reference_answer,
-        user_response=user_response,
-        target_pattern=drill_spec["target_pattern"]["mechanism"],
-        success_signal=drill_spec["target_pattern"]["success_signal"],
-    )
-    judge_prompt_sha256 = hashlib.sha256(judge_template.encode("utf-8")).hexdigest()
-    canonical_judge_schema = json.dumps(
-        JUDGE_SCHEMA,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    judge_schema_sha256 = hashlib.sha256(
-        canonical_judge_schema.encode("utf-8")
-    ).hexdigest()
     try:
-        judgment = state.llm.chat_json(
-            [{"role": "user", "content": judge_prompt}],
-            output_schema=JUDGE_SCHEMA,
-        )
-    except Exception as e:
-        errmsg(f"判分失败: {e}")
+        judgment = state.application().judge_and_record_drill(preparation, user_response)
+    except Exception as exc:
+        errmsg(str(exc))
         return
 
-    is_correct = judgment.get("is_correct")
-    if not isinstance(is_correct, bool):
-        errmsg("判分失败: is_correct 必须是 JSON 布尔值")
-        return
-
-    feedback = judgment.get("feedback")
-    if not isinstance(feedback, str):
-        errmsg("判分失败: feedback 必须是文本")
-        return
-    feedback = feedback.strip()
-
-    source_error_id = context[source_index].error_id
-
-    try:
-        attempt_result = state.db.record_drill_attempt(
-            source_error_id,
-            drill_spec,
-            question,
-            reference_answer,
-            user_response,
-            is_correct,
-            feedback,
-            judge_provider=state.cfg.get("provider") or "unknown",
-            judge_model=state.cfg.get("model") or "unknown",
-            judge_prompt_sha256=judge_prompt_sha256,
-            judge_schema_sha256=judge_schema_sha256,
-        )
-    except Exception as error:
-        errmsg(f"保存演练结果失败: {error}")
-        return
-
-    if is_correct:
+    if judgment.is_correct:
         popup_content(
             "本次演练判定为正确。该结果会作为一次干预记录保存，"
             "不等于未来错误已减少。",
@@ -746,15 +357,15 @@ def _cmd_drill(state, arg):
         successmsg("本次演练判定为正确，结果已记录")
     else:
         body = [("bold red", "❌ 本次演练判定为错误\n\n")]
-        if feedback:
+        if judgment.feedback:
             body.append(("class:label", "💡 评估反馈:\n"))
-            body.extend(render_markdown_to_formatted_text(feedback))
+            body.extend(render_markdown_to_formatted_text(judgment.feedback))
             body.append(("", "\n"))
         popup_content(body, title="演练评估结果")
         errmsg("答错了，已自动将此衍生题作为新 Error 入库")
 
         sysmsg(
-            f"新 error (ID: #{attempt_result.derived_error_id}) 已入库，"
+            f"新 error (ID: #{judgment.attempt.derived_error_id}) 已入库，"
             "可随时输入 /resume 处理"
         )
 

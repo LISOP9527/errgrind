@@ -31,6 +31,27 @@ pending-grill → pending-teach → done
 
 Drill 遵循 `DrillSpec → Draft → Judge` 流程。每次完成判分都写入 `drill_attempts`；答错时根据结果派生一个新的 `pending-grill` Error，答对也必须保留判分记录。
 
+## Core/Application 架构原则
+
+业务工作流的依赖方向固定为：
+
+```text
+CLI / TUI 或未来其他 frontend
+                 ↓
+       errgrind.application
+                 ↓
+        DB / LLM / Prompt / Models
+```
+
+- `errgrind.application` 是 Grill、Teach 和 Drill 的统一应用边界，负责 Prompt 组装、LLM 编排、输出契约校验、状态转换、会话持久化，以及 Drill provenance、lineage 和原子记录。这些规则不得在 frontend 中重新组装或复制。
+- frontend 只负责收集用户输入、渲染结构化结果、popup/确认、按键和进度展示。它可以调用 application 操作，但不得通过 `db.update_*() → llm.*() → db.update_*()` 自行实现业务流程。
+- Application/Core 不得依赖 `rich`、`prompt_toolkit`、`errgrind.cli`、CLI state、popup、console rendering 或 key binding。跨边界返回 dataclass、enum、typed object 或简单 domain model，并用可区分的业务异常表达失败。
+- SQLite 中的 ErrGrind 会话和业务记录是工作流的事实来源。Application 必须在可失败的模型调用前保存已接收的 bootstrap/用户输入，并统一维护上述状态与持久化不变量。UI 不得把直接 CRUD 当作完成 workflow 的业务 API。
+- 为流式显示或交互进度提供的可选 callback，只能传递 token、生命周期或阶段事件；Application 不得接收或生成终端渲染对象。
+- 优先保持当前实现所需的最小解耦。不为架构形式引入尚无现实消费者的 repository interface、DI framework 或复杂 class hierarchy。
+- 未来 MCP、GUI 或 Mobile 都应作为 `ErrGrindApplication` 的薄 adapter，不得 import CLI、模拟终端交互或复制 workflow。本原则不表示现在需要实现 MCP SDK、MCP server 或 MCP-specific contract。
+- 修改 Grill、Teach、Drill、会话恢复、状态转换或 Drill 时，优先直接测试 application boundary，同时保留必要的 CLI integration tests，确认 adapter 仍正确处理输入、渲染与中断。
+
 ## 设计记录
 
 - 设计和决策统一记录在 `design/`，并从 `design/README.md` 建索引，便于 review。
@@ -50,7 +71,8 @@ Drill 遵循 `DrillSpec → Draft → Judge` 流程。每次完成判分都写�
 
 实现细节以源码为准，不在此处复制易漂移的命令、配置、数据库 SQL 或模型列表：
 
-- CLI 入口、slash command、工作流与状态交互：`errgrind/cli/app.py`、`errgrind/cli/commands.py`、`errgrind/cli/state.py`、`errgrind/cli/ui.py`
+- Grill、Teach、Drill 工作流、状态转换与结构化结果：`errgrind/application/`
+- CLI 入口、slash command、终端交互、渲染与 application adapter：`errgrind/cli/app.py`、`errgrind/cli/commands.py`、`errgrind/cli/state.py`、`errgrind/cli/ui.py`
 - 数据模型、数据库 schema、迁移与 CRUD：`errgrind/models/`、`errgrind/db/schema.py`、`errgrind/db/ops.py`
 - LLM provider、OCR 与 Prompt 加载：`errgrind/llm/`、`prompts/`
 - 配置读写：`errgrind/config.py`

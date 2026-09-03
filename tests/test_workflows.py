@@ -6,14 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from errgrind.application.drill import JUDGE_SCHEMA, source_leak_terms as _source_leak_terms
 from errgrind.cli.commands import (
-    JUDGE_SCHEMA,
     _cmd_drill,
     _cmd_ocr,
     _cmd_record,
     _run_grilling,
     _run_teaching,
-    _source_leak_terms,
 )
 from errgrind.cli.state import AppState
 from errgrind.db.ops import Database
@@ -732,6 +731,14 @@ class ConversationWorkflowTests(unittest.TestCase):
         self.db.close()
         self.temp_dir.cleanup()
 
+    def test_state_builds_a_fresh_facade_after_provider_replacement(self):
+        first, second = _ConversationLLM([]), _ConversationLLM([])
+        state = AppState(db=self.db, llm=first, prompts=PromptManager())
+
+        self.assertIs(state.application().llm, first)
+        state.llm = second
+        self.assertIs(state.application().llm, second)
+
     def test_ctrl_c_exits_teach_and_marks_error_done(self):
         error_id = self.db.create_error("题目", "思路")
         self.db.update_grilling(error_id, json.dumps([
@@ -812,13 +819,12 @@ class ConversationWorkflowTests(unittest.TestCase):
         error_id = self.db.create_error("题目", "思路")
         state = AppState(
             db=self.db,
-            llm=_ConversationLLM([]),
+            llm=_ConversationLLM(["发现的模式\n[GRILLING_END]"]),
             prompts=PromptManager(),
             cfg={"grill_max_turns": 1},
         )
 
         with (
-            patch("errgrind.cli.commands._llm_chat", return_value="发现的模式\n[GRILLING_END]"),
             patch("errgrind.cli.commands.popup_confirm", return_value=True),
             patch("errgrind.cli.commands._run_teaching") as run_teaching,
             patch("errgrind.cli.commands.console.print"),
@@ -836,13 +842,12 @@ class ConversationWorkflowTests(unittest.TestCase):
         error_id = self.db.create_error("题目", "思路")
         state = AppState(
             db=self.db,
-            llm=_ConversationLLM([]),
+            llm=_ConversationLLM(["首个问题", "继续追问"]),
             prompts=PromptManager(),
             cfg={"grill_max_turns": 1},
         )
 
         with (
-            patch("errgrind.cli.commands._llm_chat", side_effect=["首个问题", "继续追问"]),
             patch("errgrind.cli.commands.multiline_input", return_value="学生回答"),
             patch("errgrind.cli.commands.console.print"),
             patch("errgrind.cli.commands.sysmsg") as system_message,
@@ -858,13 +863,12 @@ class ConversationWorkflowTests(unittest.TestCase):
         error_id = self.db.create_error("题目", "思路")
         state = AppState(
             db=self.db,
-            llm=_ConversationLLM([]),
+            llm=_ConversationLLM(["先说说你的判断"]),
             prompts=PromptManager(),
             cfg={"grill_max_turns": 1},
         )
 
         with (
-            patch("errgrind.cli.commands._llm_chat", return_value="先说说你的判断"),
             patch("errgrind.cli.commands.multiline_input", side_effect=KeyboardInterrupt),
             patch("errgrind.cli.commands.console.print"),
             patch("errgrind.cli.commands.sysmsg"),
@@ -876,11 +880,8 @@ class ConversationWorkflowTests(unittest.TestCase):
         self.assertIn("先说说你的判断", interrupted.grilling_conversation)
 
         state.accessed_error_ids.clear()
+        state.llm = _ConversationLLM(["忽略了边界条件\n[GRILLING_END]"])
         with (
-            patch(
-                "errgrind.cli.commands._llm_chat",
-                return_value="忽略了边界条件\n[GRILLING_END]",
-            ),
             patch("errgrind.cli.commands.multiline_input", return_value="我直接套了公式"),
             patch("errgrind.cli.commands.popup_confirm", return_value=False),
             patch("errgrind.cli.commands._show_context_recap"),
@@ -903,21 +904,15 @@ class ConversationWorkflowTests(unittest.TestCase):
             cfg={"grill_max_turns": 1},
         )
 
-        with (
-            patch("errgrind.cli.commands._llm_chat", side_effect=KeyboardInterrupt),
-            patch("errgrind.cli.commands.sysmsg"),
-        ):
+        with (patch.object(state.llm, "chat", side_effect=KeyboardInterrupt), patch("errgrind.cli.commands.sysmsg")):
             _run_grilling(state, self.db.get_error(error_id))
 
         interrupted = self.db.get_error(error_id)
         self.assertEqual(interrupted.status, "pending-grill")
         self.assertEqual(json.loads(interrupted.grilling_conversation)[-1]["content"], "开始吧")
 
+        state.llm = _ConversationLLM(["忽略了定义域\n[GRILLING_END]"])
         with (
-            patch(
-                "errgrind.cli.commands._llm_chat",
-                return_value="忽略了定义域\n[GRILLING_END]",
-            ),
             patch("errgrind.cli.commands.popup_confirm", return_value=False),
             patch("errgrind.cli.commands._show_context_recap"),
             patch("errgrind.cli.commands.console.print"),

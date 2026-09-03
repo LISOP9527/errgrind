@@ -6,7 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from errgrind.cli.commands import _grilling_summary, _is_grilling_complete
+from errgrind.application.grill import grilling_summary as _grilling_summary
+from errgrind.application.grill import is_grilling_complete as _is_grilling_complete
 from errgrind.config import prepare_database_path
 from errgrind.cli.ui import (
     _format_math_for_terminal,

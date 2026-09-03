@@ -1,5 +1,12 @@
 # 当前进度与验证记录
 
+## 2026-09-03：Core/Application 工作流拆分
+
+- 新增 `errgrind.application.ErrGrindApplication` 作为 UI 无关的应用边界，Grill、Teach、Drill 的 Prompt 组装、LLM 调用、契约校验和持久化不再由 CLI 编排。
+- CLI 保留输入循环、Ctrl+C / EOF 交互、Rich / prompt_toolkit 渲染、popup 与进度提示；`record`、OCR、status 和 config 本次有意保留在 CLI / bootstrap 边界。
+- Grill 保持 partial 会话恢复和完成后只读；Teach 保持首次保存进入 `done` 且可继续对话；Drill 保持 Spec 白名单隔离、Judge provenance 和原子 attempt / lineage 写入。
+- 验证：`.venv/bin/python -m unittest discover -s tests -v`，`Ran 79 tests ... OK`。未调用真实 API，测试只使用临时 SQLite 数据库。
+
 ## 2026-09-02：暂缓 Pattern Observation 校验
 
 - 当前 MVP 继续直接使用 `grilling_summary` 表达本次 Grill 发现的 Pattern，不新增 Observation schema、Evidence quote 校验、持久化或 review 流程。
