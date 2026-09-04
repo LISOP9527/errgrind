@@ -14,7 +14,7 @@
 
 ## Rationale
 
-完成的 Grill 是对当前 Error 提取出的 Pattern Evidence，应保持稳定和可审阅。Teach 是基于这份 Evidence 的干预讨论，允许持续追加比反复重置更符合用户自然复习和追问的方式。
+完成的 Grill 是对当前 Error 形成的 episode-level diagnosis 及其 Evidence，应保持稳定和可审阅；它不是已确认的跨 Error Pattern。Teach 是基于这份诊断 Evidence 的干预讨论，允许持续追加比反复重置更符合用户自然复习和追问的方式。
 
 ## Consequences
 

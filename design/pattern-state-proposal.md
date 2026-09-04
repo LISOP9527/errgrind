@@ -2,7 +2,7 @@
 
 ## 为什么暂时不直接新增 `patterns` 表
 
-当前 `grilling_summary` 是针对一次 Error 得出的自然语言结论。它很有价值，但仍只是一个待验证的假设。
+当前 `grilling_summary` 是针对一次 Error 得出的自然语言结论：它是 episode-level diagnosis，仍只是一个待验证的假设，不是跨 Error 的长期 Pattern。
 
 如果把每条摘要直接当成一个 Pattern，会产生大量措辞不同、机制相同的重复项；如果让 LLM 自动合并，又可能把表面相似、实际机制不同的 Error 错误归类。两种做法都会让 Thinking Model 看起来很完整，却失去可证伪性。
 
@@ -22,6 +22,7 @@
 - `alternative_explanations`：仍未排除的其它解释及各自的支持/反对证据引用。
 
 Observation 必须关联原始 Error 和不可变的 Grill 对话版本。写入时要验证每个引用确实存在、角色为 `user`、原文片段与消息内容一致；没有可定位用户证据的推测只能保持 `proposed` 或 `uncertain`。Observation 是证据上的解释，不是用户的永久标签。
+诊断还应保留候选替代解释、支持与反对它们的 Evidence，以及哪些未来 Evidence 会改变当前判断。未来的结构化假设可以参与下一问题的选择，而不只是事后提取摘要。
 
 ### Pattern Candidate
 
@@ -128,7 +129,7 @@ patterns
 
 已在 `2026-09-01-evidence-provenance-drill-ledger` 决策中实现。它解决数据是否来自真实 Error、OCR 还是 Drill，以及 Action 结果能否追溯的问题。
 
-当前 MVP 停留在这一阶段：直接使用 `grilling_summary` 保存本次 Grill 对 Pattern 的自然语言总结，
+当前 MVP 停留在这一阶段：直接使用 `grilling_summary` 保存本次 Grill 对 episode-level diagnosis 的自然语言总结，
 不执行结构化 Observation 提取、Evidence quote 校验、持久化或 review。下面的 Stage 1 仅是未来提案，
 不代表当前实现计划。
 

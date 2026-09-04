@@ -4,7 +4,7 @@
 
 数学错题常来自截图、试卷照片和手写草稿。直接要求用户逐字录入会增加阻力，但数学 OCR
 会混淆分数、上下标、根号、几何标签和手写符号。若未经确认就入库，错误文本会继续污染
-Grill、Teach 和 Drill 的 Pattern 判断。
+Grill 的 episode-level diagnosis，以及 Teach 和 Drill 使用的机制判断。
 
 ## Decision
 

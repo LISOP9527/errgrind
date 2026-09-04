@@ -9,7 +9,7 @@
 
 ## 2026-09-02：暂缓 Pattern Observation 校验
 
-- 当前 MVP 继续直接使用 `grilling_summary` 表达本次 Grill 发现的 Pattern，不新增 Observation schema、Evidence quote 校验、持久化或 review 流程。
+- 当前 MVP 继续直接使用 `grilling_summary` 表达本次 Grill 的 episode-level diagnosis，不新增 Observation schema、Evidence quote 校验、持久化或 review 流程。
 - 结构化 Pattern Observation 保留为未来设计提案，只有用户再次确认进入该阶段后才实现。
 
 ## 2026-09-01：Judge provenance Schema v2
@@ -51,7 +51,8 @@ Ran 61 tests ... OK
 1. 一张带轻微倾斜和扫描噪声的数学错题 PNG 成功识别题目、学生错误演算、参考答案；公式转成
    LaTeX，三个区域没有混淆。真实 `/ocr` 校对后创建 `pending-grill` 记录。
 2. 由易到难完成 5 组真实 Grill → Teach：百分比变化基准、根式方程增根、条件概率样本空间、
-   不可导临界点、反向使用级数判别法。每组经 2–3 次学生回答后形成可迁移 Pattern，随后 Teach
+   不可导临界点、反向使用级数判别法。每组经 2–3 次学生回答后形成可迁移机制候选；长期 Pattern
+   仍需跨 Error 或后续行为 Evidence 支持。随后 Teach
    保存并进入 `done`。
 3. `/drill` 正确分支生成几何命题证明/反例题，参考级作答被判正确，记录数保持 5。
 4. `/drill` 错误分支识别出缺少条件验证的作答，记录数从 5 增至 6，新记录状态为

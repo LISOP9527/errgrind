@@ -5,7 +5,7 @@
 ## 设计文档
 
 - [长期架构](long-term-architecture.md)：Evidence -> State -> Policy -> Action -> New Evidence 的系统闭环。
-- [核心原则](core-principles.md)：ErrGrind 为什么围绕 Pattern、State、Policy 和减少未来 Error 设计。
+- [核心原则](core-principles.md)：ErrGrind 如何围绕 Evidence、可更新 State、Policy 和减少未来 Error 设计。
 - [Pattern State 演进提案](pattern-state-proposal.md)：从单次 Grill 假设逐步建立可审查、可证伪的 Pattern State，区分真实 Evidence 与干预结果。
 - [“减少未来 Error”的验证策略](evaluation-strategy.md)：区分流程、模型、行为迁移和真实结果，说明 recurrence、盲法关联与学习机会分母。
 - [架构解耦原则](ui-decoupling.md)：从 TUI 演进到 GUI / Mobile 时必须遵守的 Core/UI 边界。
@@ -21,6 +21,7 @@
 - [Evidence 来源与 Drill Action Ledger](decisions/2026-09-01-evidence-provenance-drill-ledger.md)：记录 Error 来源、Drill 判分与衍生 Error 的可追溯关系。
 - [暂缓 Pattern Observation 校验](decisions/2026-09-02-defer-pattern-observation-validation.md)：当前 MVP 直接使用 `grilling_summary`，暂不引入结构化 Observation 与 Evidence 校验。
 - [Application 工作流边界](decisions/2026-09-03-application-workflow-boundary.md)：Grill、Teach、Drill 通过 UI 无关 façade 供未来前端复用。
+- [Grill 作为主动诊断](decisions/2026-09-04-grill-as-active-diagnosis.md)：Grill 通过区分候选解释收集 Evidence；一次结果只是 episode-level diagnosis，长期 Pattern 需跨证据支持。
 
 ## 维护规则
 

@@ -130,6 +130,20 @@ MVP 可以从低负担方案开始，而不是记录全部学习行为：
 
 当系统拥有经过审查的 Pattern、冻结 revision、独立 Future Assessment 和可信 opportunity 分母后，才可以报告带样本量、来源和限制的趋势。因果声明还需要更强的对照设计，不能仅凭前后变化。
 
+## 当前 Grill 实验的早期评估
+
+在评估长期 recurrence 之前，先评估 Grill 是否在做有效诊断：
+
+- 真实成因是否进入候选解释集合；
+- 是否过早收敛到单一解释；
+- 每个问题是否具有足够的区分度和信息价值；
+- 是否通过提示、教学或诱导性措辞污染用户 Evidence；
+- Evidence 不足时是否诚实保留不确定性；
+- 从问题到 episode-level diagnosis 的问题数量与用户负担；
+- 用户疲劳和放弃通常发生在第几个问题之后。
+
+这些指标评估诊断质量与交互成本，不把一次 Grill 结果当作已确认的长期 Pattern。
+
 ## 推荐的下一项产品实验
 
 先不要扩展更多 Action。选择少量真实 Error，人工审阅其 Pattern Observation；后续新 Error 使用两阶段盲法关联。同时以尽量低负担的方式记录相关 opportunity。观察用户是否愿意完成 review、Observation 是否忠实、Candidate 是否真的复现，以及 opportunity 数据是否可持续采集。

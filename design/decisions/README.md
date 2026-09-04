@@ -27,3 +27,4 @@ YYYY-MM-DD-short-title.md
 - [Evidence 来源与 Drill Action Ledger](2026-09-01-evidence-provenance-drill-ledger.md)：记录来源 provenance 与 Drill 干预账本；不把正确率当作未来 Error 减少证明。
 - [暂缓 Pattern Observation 校验](2026-09-02-defer-pattern-observation-validation.md)：当前 MVP 继续使用 `grilling_summary`，结构化 Observation 与 Evidence 校验留待以后明确决定。
 - [Application 工作流边界](2026-09-03-application-workflow-boundary.md)：以 UI 无关的 application façade 编排 Grill、Teach、Drill，CLI 退为终端 adapter。
+- [Grill 作为主动诊断](2026-09-04-grill-as-active-diagnosis.md)：Grill 区分候选解释并允许不确定结果；一次 Grill 不是已确认的长期 Pattern。

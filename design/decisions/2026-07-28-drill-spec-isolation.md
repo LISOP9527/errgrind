@@ -12,7 +12,7 @@
 
 `/drill` 的出题部分固定为两个阶段：
 
-1. **Spec：理解 Error 并生成 DrillSpec。** 本阶段读取最近 N 条 Error 的原题和 Grill 摘要，只选择一个 Error Pattern，输出 `source_error_number`、`target_pattern`、`new_problem` 和 `difficulty`。`target_pattern` 包含 `success_signal`，用于描述“判断学生是否克服该 Pattern 时，应观察到的思考行为”。因为只有本阶段看得到原题，所以“不要复述原题或只做表面改写”的要求只放在 Spec Prompt。
+1. **Spec：理解 Error 并生成 DrillSpec。** 本阶段读取最近 N 条 Error 的原题和 Grill 摘要，只选择一个 summary-derived mechanism，输出 `source_error_number`、`target_pattern`、`new_problem` 和 `difficulty`。`target_pattern` 包含 `success_signal`，用于描述“判断学生是否在本次干预中展示目标思考行为时，应观察到的信号”。因为只有本阶段看得到原题，所以“不要复述原题或只做表面改写”的要求只放在 Spec Prompt。
 2. **Draft：根据 DrillSpec 出题。** 本阶段只读取程序白名单重建后的 DrillSpec，看不到原题和完整 Grill 上下文，只输出 `question` 与 `reference_answer`。Draft Prompt 只描述如何落实规格，不再强调“禁止原题换皮”。
 
 用户作答后仍调用 Judge 判分；Judge 是答题后的评估步骤，不属于出题阶段。完整流程为：

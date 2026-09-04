@@ -2,7 +2,7 @@
 
 ## 产品目标与 MVP 边界
 
-ErrGrind 不是 AI 错题本。它通过用户使用过程中的 Evidence 建立 Thinking Model，识别可能导致未来 Error 的 Pattern，并设计 Action 优化用户的思考过程，最终减少未来 Error。解释某道题的错误是发现 Pattern 的手段，不是最终目标。
+ErrGrind 不是 AI 错题本。Error 提供关于思考过程的 Evidence；Grill 针对多个候选解释收集有区分度的新 Evidence，形成本次 Error 的 episode-level diagnosis；跨 Error 或后续行为的独立 Evidence 才能支持可证伪、可更新的长期 Pattern，并据此设计 Action，最终减少未来 Error。解释某道题的错误是诊断手段，不是最终目标。
 
 当前 MVP 只针对数学题。Prompt、测试和设计讨论均以数学题为范围，除非用户明确扩大范围。
 
@@ -12,7 +12,7 @@ ErrGrind 不是 AI 错题本。它通过用户使用过程中的 Evidence 建立
 Error → Grill → Teach → Drill → Future Error
 ```
 
-阶段方向固定，但 CLI 采用 slash command 加状态机，操作是非线性的。Grill 发现当前 Error 背后的 Pattern；Teach 针对 Pattern 帮助用户理解并纠正思考过程；Drill 综合已有 Error 的 Pattern，帮助建立新的思维模式。Drill 不是 Teach 的即时考试，未来真实学习中产生的新 Error 才是更重要的验证证据。
+阶段方向固定，但 CLI 采用 slash command 加状态机，操作是非线性的。Grill 区分当前 Error 的候选成因并形成 episode-level diagnosis；Teach 针对当前总结出的机制帮助用户理解并纠正思考过程；Drill 综合已有 Error 的机制假设，帮助建立新的思维模式。这个 Error → Grill → Teach → Drill → Future Error 是产品工作流，不是 Evidence 形成长期 Pattern 的认识论结构。一次 Grill 结果不是稳定 Pattern；长期 Pattern 需要跨 Error 或后续行为的独立 Evidence。Drill 不是 Teach 的即时考试，未来真实学习中产生的新 Error 才是更重要的验证证据。
 
 ## Error 状态机与持久化不变量
 

@@ -16,13 +16,13 @@ Evidence
 
 ## Evidence（证据）
 
-Evidence 是用户行为的原始观察。
+Evidence 是用户行为或对话中可审查的原始观察。
 
-MVP 中，Evidence **只来自真实 Error**。
+Evidence 不只是真实 Error；当前 Grill 的回答和推理也是 Evidence。一次 Error 通常有多个可能成因，Grill 用问题收集能区分它们的新 Evidence。
 
-这样可以保证 Pattern 的准确性，降低误报。
+一次 Grill 的结果是 episode-level diagnosis，不自动成为长期 Pattern。
 
-未来可以逐步扩展 Evidence，例如：
+未来还可以逐步扩展 Evidence，例如：
 
 - 思考过程
 - Chat
@@ -70,13 +70,17 @@ LLM 不应该替代 Policy 决定系统状态转换。
 
 ---
 
-## Action（干预）
+## Action（探查与干预）
 
-Action 是真正作用于用户的行为。
+Action 是真正作用于用户的行为，概念上分为两类：
+
+- **Probe**：主要用于减少诊断不确定性，例如 Grill 问题或诊断变式；
+- **Intervention**：主要用于改变未来行为，例如 Teach、Drill。
+
+Drill 当前仍是针对 summary-derived mechanism 的干预；未来也可能同时承担 Probe 与 Intervention 的作用。
 
 例如：
 
-- Grill
 - Teach
 - Drill
 - Review
