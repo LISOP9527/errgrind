@@ -129,9 +129,21 @@ patterns
 
 已在 `2026-09-01-evidence-provenance-drill-ledger` 决策中实现。它解决数据是否来自真实 Error、OCR 还是 Drill，以及 Action 结果能否追溯的问题。
 
-当前 MVP 停留在这一阶段：直接使用 `grilling_summary` 保存本次 Grill 对 episode-level diagnosis 的自然语言总结，
-不执行结构化 Observation 提取、Evidence quote 校验、持久化或 review。下面的 Stage 1 仅是未来提案，
-不代表当前实现计划。
+当前 MVP 已完成这一阶段；`grilling_summary` 仍是兼容性的自然语言输出，不能单独视为长期 Pattern。
+
+### Stage 0.5：结构化 episode diagnosis（已实现）
+
+每个 Error 的 Grill 还会保存一个 nullable 的 `GrillDiagnosticState`：
+
+- hypotheses、Evidence ledger 和 Probe 只属于这一次 Error；
+- Evidence 必须能回指 initial user thoughts 或真实 Grill user message 的原文片段；
+- LLM 每轮只输出 delta，由 Application 确定性合并，旧 hypothesis claim、Evidence 和 Probe 不被重写或删除；
+- Probe 显式区分 `reasoning_question` 与诊断用 `variant_problem`；variant 不进入普通 Drill ledger；
+- episode diagnosis 可以完成为 supported 或 undetermined，但不会创建 Candidate、跨 Error 合并或长期 Pattern。
+
+没有 Candidate merge、accepted/rejected human review、Pattern promotion 或长期 Pattern State。原 Stage 1/2/3 仍是未来工作。
+
+下面的 Stage 1 仅是未来提案，不代表当前实现计划。
 
 ### Stage 1：结构化 Observation，但不自动建模
 

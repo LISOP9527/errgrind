@@ -18,20 +18,25 @@ Evidence
 
 Evidence 是用户行为或对话中可审查的原始观察。
 
-Evidence 不只是真实 Error；当前 Grill 的回答和推理也是 Evidence。一次 Error 通常有多个可能成因，Grill 用问题收集能区分它们的新 Evidence。
+Evidence 不只是真实 Error；当前 Grill 中用户的回答也是 Evidence。一次 Error 通常有多个可能成因，Grill 用问题收集能区分它们的新 Evidence。
 
 一次 Grill 的结果是 episode-level diagnosis，不自动成为长期 Pattern。
 
+当前 MVP 可以审查的 Evidence 包括：
+
+- authentic Error；
+- 录题时的 initial user thoughts；
+- Grill 中真实的用户回答。
+
 未来还可以逐步扩展 Evidence，例如：
 
-- 思考过程
-- Chat
-- Coding
-- Near Miss（差点犯错）
-- Micro Check
-- 其它行为数据
+- broader chat；
+- Coding；
+- Near Miss（差点犯错）；
+- Micro Check；
+- 其它外部行为数据。
 
-但这些都不是 MVP 的内容。
+这些未来来源不属于当前 MVP。
 
 ---
 

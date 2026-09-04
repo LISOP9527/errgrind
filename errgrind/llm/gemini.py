@@ -34,19 +34,21 @@ class GeminiClient:
 
     @staticmethod
     def _request_body(messages: list[dict], kwargs: dict) -> dict:
-        system_instruction = None
+        system_messages = []
         contents = []
         for m in messages:
             if m["role"] == "system":
-                system_instruction = {"parts": [{"text": m["content"]}]}
+                system_messages.append(m["content"])
             elif m["role"] == "user":
                 contents.append({"role": "user", "parts": [{"text": m["content"]}]})
             elif m["role"] == "assistant":
                 contents.append({"role": "model", "parts": [{"text": m["content"]}]})
 
         body = {}
-        if system_instruction:
-            body["system_instruction"] = system_instruction
+        if system_messages:
+            body["system_instruction"] = {
+                "parts": [{"text": "\n\n".join(system_messages)}]
+            }
         body["contents"] = contents
         body.update(kwargs)
         return body
@@ -140,6 +142,9 @@ class GeminiClient:
 
     def chat_json(self, messages: list[dict], **kwargs) -> dict:
         output_schema = kwargs.pop("output_schema", None)
+        json_attempts = max(
+            1, int(kwargs.pop("max_json_attempts", self.max_retries))
+        )
         config = dict(kwargs.pop("generation_config", {}))
         config["response_mime_type"] = "application/json"
         if output_schema is not None:
@@ -148,7 +153,7 @@ class GeminiClient:
         retry_messages = list(messages)
         last_error = None
         last_text = ""
-        for attempt in range(self.max_retries):
+        for attempt in range(json_attempts):
             last_text = self.chat(retry_messages, generationConfig=config, **kwargs)
             try:
                 if not isinstance(last_text, str):
@@ -161,7 +166,7 @@ class GeminiClient:
                 return result
             except (json.JSONDecodeError, TypeError, ValueError) as e:
                 last_error = e
-                if attempt < self.max_retries - 1:
+                if attempt < json_attempts - 1:
                     retry_messages = [
                         *messages,
                         {

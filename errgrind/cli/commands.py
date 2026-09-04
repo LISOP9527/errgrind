@@ -9,6 +9,8 @@ from ..application import (
     GrillState,
     InvalidWorkflowState,
     NoDrillContext,
+    OutputContractError,
+    WorkflowPersistenceError,
     WorkflowModelError,
 )
 from .state import AppState
@@ -102,6 +104,16 @@ def _render_grill_response(result):
         ))
 
 
+def _pause_grill_safely(state: AppState, error_id: int) -> None:
+    """The submitted user message was already saved before model work."""
+    try:
+        state.application().pause_grill(error_id)
+    except Exception:
+        # A second persistence failure must not turn a recoverable Grill error
+        # into a crashed CLI session.  The pre-call save remains authoritative.
+        pass
+
+
 def _run_grilling(state: AppState, error):
     initial_result = None
     if error.status != "pending-grill":
@@ -145,12 +157,12 @@ def _run_grilling(state: AppState, error):
                 return
         state.application().pause_grill(error.id)
         sysmsg("已达到最大对话轮数，对话已保存")
-    except WorkflowModelError as exc:
+    except (WorkflowModelError, OutputContractError, WorkflowPersistenceError) as exc:
         errmsg(str(exc))
-        state.application().pause_grill(error.id)
+        _pause_grill_safely(state, error.id)
     except (KeyboardInterrupt, EOFError):
         sysmsg("Grilling 对话已保存（中断）")
-        state.application().pause_grill(error.id)
+        _pause_grill_safely(state, error.id)
 
 
 def _run_teaching(state: AppState, error):

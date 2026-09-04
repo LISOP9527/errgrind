@@ -82,11 +82,14 @@ class LLMClient:
         # newer json_schema mode.  The shared command layer still validates
         # the returned fields locally.
         kwargs.pop("output_schema", None)
+        json_attempts = max(
+            1, int(kwargs.pop("max_json_attempts", self.max_retries))
+        )
         kwargs.setdefault("temperature", 0.2)
         retry_messages = list(messages)
         last_error = None
         last_text = ""
-        for attempt in range(self.max_retries):
+        for attempt in range(json_attempts):
             last_text = self.chat(
                 retry_messages,
                 response_format={"type": "json_object"},
@@ -99,7 +102,7 @@ class LLMClient:
                 return result
             except (json.JSONDecodeError, TypeError, ValueError) as e:
                 last_error = e
-                if attempt < self.max_retries - 1:
+                if attempt < json_attempts - 1:
                     retry_messages = [
                         *messages,
                         {

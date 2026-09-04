@@ -18,6 +18,7 @@ class ErrorRecord:
     teach_conversation: Optional[str]
     created_at: datetime
     updated_at: datetime
+    grilling_diagnostic_state: Optional[str] = None
 
 
 @dataclass

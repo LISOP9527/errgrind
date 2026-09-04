@@ -273,12 +273,15 @@ class CodexClient:
         # with a known contract pass one; generic JSON calls rely on the
         # prompt plus the local parse/retry guard below.
         output_schema = kwargs.pop("output_schema", None)
+        json_attempts = max(
+            1, int(kwargs.pop("max_json_attempts", self.max_retries))
+        )
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
         retry_messages = list(messages)
         last_text = ""
         last_error: Exception | None = None
-        for attempt in range(self.max_retries):
+        for attempt in range(json_attempts):
             last_text = self.chat(retry_messages, **kwargs)
             try:
                 result = json.loads(last_text)
@@ -287,7 +290,7 @@ class CodexClient:
                 return result
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 last_error = exc
-                if attempt + 1 < self.max_retries:
+                if attempt + 1 < json_attempts:
                     retry_messages = [
                         *messages,
                         {"role": "assistant", "content": last_text},

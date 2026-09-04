@@ -34,6 +34,7 @@ class Database:
             reference_answer=row["reference_answer"],
             grilling_conversation=row["grilling_conversation"],
             grilling_summary=row["grilling_summary"],
+            grilling_diagnostic_state=row["grilling_diagnostic_state"],
             teach_conversation=row["teach_conversation"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -98,6 +99,38 @@ class Database:
             (conversation, summary, error_id),
         )
         self.conn.commit()
+
+    def save_grilling_progress(
+        self,
+        error_id: int,
+        conversation_json: str,
+        diagnostic_state_json: Optional[str],
+    ):
+        """Atomically save a recoverable Grill conversation and its state."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE error_records SET grilling_conversation = ?, "
+                "grilling_diagnostic_state = ?, status = 'pending-grill', "
+                "updated_at = datetime('now') WHERE id = ?",
+                (conversation_json, diagnostic_state_json, error_id),
+            )
+
+    def complete_grilling(
+        self,
+        error_id: int,
+        conversation_json: str,
+        summary: str,
+        diagnostic_state_json: str,
+    ):
+        """Atomically finish Grill and move the Error to pending-teach."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE error_records SET grilling_conversation = ?, "
+                "grilling_summary = ?, grilling_diagnostic_state = ?, "
+                "status = 'pending-teach', updated_at = datetime('now') "
+                "WHERE id = ?",
+                (conversation_json, summary, diagnostic_state_json, error_id),
+            )
 
     def update_teach(self, error_id: int, conversation: str):
         self.conn.execute(

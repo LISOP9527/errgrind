@@ -1,5 +1,13 @@
 # 当前进度与验证记录
 
+## 2026-09-05：结构化 episode Grill diagnosis 与诊断变式 Probe
+
+- Grill 为每个 Error 保存可审计的 hypotheses、grounded Evidence 和 Probe state；模型每轮只输出 delta，Application 负责确定性 merge。
+- `reasoning_question` 与 `variant_problem` 成为显式 Grill Probe；variant 回答不进入普通 Drill ledger，也不自动派生 Error。
+- 数据库 Schema 升级为 v3；旧记录不回填，旧 completed/partial Grill 保持兼容。
+- Grill structured output 成功校验并持久化后才通过兼容 callback 展示一次，因此不再是真 token streaming。
+- 验证：去掉本机代理变量后运行完整 offline suite，104 项测试全部通过。
+
 ## 2026-09-03：Core/Application 工作流拆分
 
 - 新增 `errgrind.application.ErrGrindApplication` 作为 UI 无关的应用边界，Grill、Teach、Drill 的 Prompt 组装、LLM 调用、契约校验和持久化不再由 CLI 编排。

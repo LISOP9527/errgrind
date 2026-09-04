@@ -133,7 +133,7 @@ class DatabaseWorkflowTests(unittest.TestCase):
             self.assertEqual(attempt.judge_schema_sha256, "unknown")
             self.assertEqual(
                 migrated.conn.execute("PRAGMA user_version").fetchone()[0],
-                2,
+                3,
             )
         finally:
             migrated.close()

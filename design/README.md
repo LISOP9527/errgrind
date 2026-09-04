@@ -22,6 +22,7 @@
 - [暂缓 Pattern Observation 校验](decisions/2026-09-02-defer-pattern-observation-validation.md)：当前 MVP 直接使用 `grilling_summary`，暂不引入结构化 Observation 与 Evidence 校验。
 - [Application 工作流边界](decisions/2026-09-03-application-workflow-boundary.md)：Grill、Teach、Drill 通过 UI 无关 façade 供未来前端复用。
 - [Grill 作为主动诊断](decisions/2026-09-04-grill-as-active-diagnosis.md)：Grill 通过区分候选解释收集 Evidence；一次结果只是 episode-level diagnosis，长期 Pattern 需跨证据支持。
+- [结构化 Grill 诊断与变式 Probe](decisions/2026-09-04-structured-grill-diagnosis-and-variant-probes.md)：每个 Error 保存 grounded Evidence、确定性诊断 delta merge 和显式 reasoning/variant Probe；长期 Pattern 仍 deferred。
 
 ## 维护规则
 

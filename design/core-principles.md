@@ -10,7 +10,7 @@ State 的价值，在于保存当前有用的判断，而不是永久标签。
 
 Policy 的价值，在于决定继续收集 Evidence，还是进行干预。
 
-Action 的价值，在于真正减少未来的 Error。
+Action 的价值，在于减少诊断不确定性或改变未来行为，并最终服务于减少未来 Error。
 
 新 Evidence 必须能够更新或推翻 State。因此：
 

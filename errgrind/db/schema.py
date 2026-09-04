@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 SCHEMA_SQL = """
@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS error_records (
     reference_answer TEXT,
     grilling_conversation TEXT,
     grilling_summary TEXT,
+    grilling_diagnostic_state TEXT,
     teach_conversation TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -62,6 +63,10 @@ def create_tables(conn):
         conn.execute("ALTER TABLE error_records ADD COLUMN source_error_id INTEGER")
     if "source_drill_attempt_id" not in columns:
         conn.execute("ALTER TABLE error_records ADD COLUMN source_drill_attempt_id INTEGER")
+    if "grilling_diagnostic_state" not in columns:
+        conn.execute(
+            "ALTER TABLE error_records ADD COLUMN grilling_diagnostic_state TEXT"
+        )
     attempt_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(drill_attempts)")
     }

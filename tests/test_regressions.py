@@ -79,6 +79,13 @@ class PromptFormattingTests(unittest.TestCase):
 
     def test_drill_prompts_preserve_contract_and_diagnostic_semantics(self):
         prompts = PromptManager()
+        grill = prompts.load("grilling.md")
+        self.assertIn('"new_hypotheses"', grill)
+        self.assertIn("`variant_problem`", grill)
+        self.assertNotIn("[GRILLING_END]", grill)
+        teach = prompts.load("teach.md")
+        self.assertIn("episode-level diagnosis", teach)
+        self.assertNotIn("把知识点和 Error Pattern 联系起来", teach)
         draft = prompts.load("drill.md")
         spec = prompts.load("drill_spec.md")
 

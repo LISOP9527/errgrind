@@ -79,6 +79,12 @@ CLI / TUI 或未来其他 frontend
 - 长期设计与决策索引：`design/README.md`
 - 当前实现进度与验证记录：`todo.md`
 
+当前 Grill 的 structured episode diagnosis 事实来源是
+`errgrind/application/grill_diagnosis.py` 和 `error_records.grilling_diagnostic_state`。
+它只属于单次 Error：不要在这里或普通 `/drill` 中推导长期 Pattern、跨 Error 合并或
+Bayesian confidence。`grilling_summary` 继续作为 Teach/Drill 的人类可读兼容输出；
+variant Probe 只进入 Grill diagnosis，不进入 `drill_attempts`。
+
 ## 测试
 
 运行离线回归测试：
