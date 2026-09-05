@@ -29,3 +29,4 @@ YYYY-MM-DD-short-title.md
 - [Application 工作流边界](2026-09-03-application-workflow-boundary.md)：以 UI 无关的 application façade 编排 Grill、Teach、Drill，CLI 退为终端 adapter。
 - [Grill 作为主动诊断](2026-09-04-grill-as-active-diagnosis.md)：Grill 区分候选解释并允许不确定结果；一次 Grill 不是已确认的长期 Pattern。
 - [结构化 Grill 诊断与变式 Probe](2026-09-04-structured-grill-diagnosis-and-variant-probes.md)：结构化保存单次 episode diagnosis，Evidence 必须 grounded，variant 属于 Grill 而非 Drill。
+- [回顾性 Grill 证据与干预后边界](2026-09-05-retrospective-grill-and-post-interference-boundary.md)：以 authentic Error 为锚点，回顾性思路是 noisy Evidence；不追踪干预后因果链，长期 Pattern 需未来独立 Evidence。

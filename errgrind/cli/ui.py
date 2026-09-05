@@ -221,7 +221,7 @@ def init_completer(commands: dict):
 def render_status_badge(status: str) -> tuple[str, str]:
     """返回 (style_class, text) 格式的 Badge"""
     if status == "pending-grill":
-        return ("class:badge-grill", "[ ⏳ 待审讯 ]")
+        return ("class:badge-grill", "[ ⏳ 待诊断 ]")
     elif status == "pending-teach":
         return ("class:badge-teach", "[ 📖 待讲解 ]")
     elif status == "done":
@@ -429,17 +429,17 @@ def render_error_detail(error, error_number: int, width: int = 72):
     if error.grilling_summary:
         append_markdown(
             "class:label",
-            "💡 Grilling 审讯摘要:\n",
+            "💡 Grill 诊断摘要:\n",
             error.grilling_summary,
         )
 
     if error.status == "pending-grill":
-        action = "继续未完成的思维审讯" if error.grilling_conversation else "开始思维审讯"
+        action = "继续未完成的 Grill 诊断" if error.grilling_conversation else "开始 Grill 诊断"
         lines.append(("class:nextstep", f"⚡ 下一步建议: 按 [g] 或 [Enter] {action} (Grill)\n"))
     elif error.status == "pending-teach":
-        lines.append(("class:nextstep", "⚡ 下一步建议: 按 [t] 或 [Enter] 开始讲解；按 [g] 查看审讯记录\n"))
+        lines.append(("class:nextstep", "⚡ 下一步建议: 按 [t] 或 [Enter] 开始讲解；按 [g] 查看 Grill 记录\n"))
     elif error.status == "done":
-        lines.append(("class:nextstep", "✓ 该错题已研讨完成！按 [g] 查看审讯记录，按 [t] 继续讲解\n"))
+        lines.append(("class:nextstep", "✓ 该错题已研讨完成！按 [g] 查看 Grill 记录，按 [t] 继续讲解\n"))
     return lines
 
 
@@ -501,7 +501,7 @@ def select_error_split_view(errors):
 
     def get_footer_text():
         return [
-            ("class:footer", " [↑/↓] 列表  [PgUp/PgDn] 详情  [Enter] 默认处理  [g] 审讯/记录  [t] 讲解  [d] 删除  [q] 返回")
+            ("class:footer", " [↑/↓] 列表  [PgUp/PgDn] 详情  [Enter] 默认处理  [g] Grill 诊断/记录  [t] 讲解  [d] 删除  [q] 返回")
         ]
 
     kb = KeyBindings()

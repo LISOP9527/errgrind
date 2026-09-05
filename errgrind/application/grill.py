@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional
 
 from .contracts import (
@@ -15,6 +14,7 @@ from .contracts import (
     OutputContractError,
     WorkflowModelError,
     WorkflowPersistenceError,
+    public_error,
 )
 from .grill_diagnosis import (
     GRILL_TURN_SCHEMA,
@@ -286,8 +286,16 @@ class GrillWorkflow:
         *,
         require_latest_user_evidence: bool,
     ):
+        # Persisted system prompts are historical records, not today's protocol.
+        # Replace them only in the request; evidence indices still use messages.
+        current_prompt = self.prompts.load("grilling.md").format(
+            question=error.question,
+            user_thoughts=error.user_thoughts or "",
+            reference_answer=error.reference_answer or "",
+        )
         call_messages = [
-            *messages,
+            {"role": "system", "content": current_prompt},
+            *(message for message in messages if message.get("role") != "system"),
             {
                 "role": "system",
                 "content": self._diagnostic_context(
@@ -299,7 +307,7 @@ class GrillWorkflow:
             raw = self._chat_json(call_messages)
         except _MalformedStructuredResponse as exc:
             first_error: OutputContractError = OutputContractError(
-                f"Grill 输出不是合法 JSON: {exc.detail}"
+                "Grill 输出不是合法 JSON"
             )
             raw = {"_invalid_json": exc.detail}
         else:
@@ -333,10 +341,10 @@ class GrillWorkflow:
             repaired = self._chat_json(repair_messages)
         except _LegacyJsonFixture as exc:
             raise OutputContractError("Grill 输出契约修复失败：没有得到第二份 JSON 输出") from exc
-        except _MalformedStructuredResponse as exc:
+        except _MalformedStructuredResponse:
             raise OutputContractError(
-                f"Grill 输出契约修复失败：仍不是合法 JSON: {exc.detail}"
-            ) from exc
+                "Grill 输出契约修复失败：仍不是合法 JSON，请稍后恢复诊断。"
+            ) from None
         try:
             return validate_turn_decision(
                 repaired,
@@ -346,7 +354,10 @@ class GrillWorkflow:
                 require_latest_user_evidence=require_latest_user_evidence,
             )
         except OutputContractError:
-            raise
+            # Semantic errors may also contain model-controlled field names.
+            raise OutputContractError(
+                "Grill 输出契约修复失败：字段或证据不符合要求，请稍后恢复诊断。"
+            ) from None
 
     def _chat_json(self, messages: list[dict[str, str]]):
         try:
@@ -360,7 +371,7 @@ class GrillWorkflow:
         except Exception as exc:
             if _looks_like_json_parse_failure(exc):
                 raise _MalformedStructuredResponse(str(exc)) from exc
-            raise WorkflowModelError(f"API 错误: {exc}") from exc
+            raise WorkflowModelError("Grill API 调用失败，请稍后恢复诊断。") from None
 
     @staticmethod
     def _repair_payload(raw: Any) -> str:
@@ -481,4 +492,4 @@ class GrillWorkflow:
     @staticmethod
     def _public_error(error):
         """Keep internal diagnostic state in DB, not in frontend results."""
-        return replace(error, grilling_diagnostic_state=None)
+        return public_error(error)

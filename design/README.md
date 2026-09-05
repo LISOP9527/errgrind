@@ -23,6 +23,7 @@
 - [Application 工作流边界](decisions/2026-09-03-application-workflow-boundary.md)：Grill、Teach、Drill 通过 UI 无关 façade 供未来前端复用。
 - [Grill 作为主动诊断](decisions/2026-09-04-grill-as-active-diagnosis.md)：Grill 通过区分候选解释收集 Evidence；一次结果只是 episode-level diagnosis，长期 Pattern 需跨证据支持。
 - [结构化 Grill 诊断与变式 Probe](decisions/2026-09-04-structured-grill-diagnosis-and-variant-probes.md)：每个 Error 保存 grounded Evidence、确定性诊断 delta merge 和显式 reasoning/variant Probe；长期 Pattern 仍 deferred。
+- [回顾性 Grill 证据与干预后边界](decisions/2026-09-05-retrospective-grill-and-post-interference-boundary.md)：以 authentic Error 为锚点，区分回顾性 noisy Evidence 与当前理解；保存但不因果归因干预后观察，长期 Pattern 仍需未来独立 Evidence。
 
 ## 维护规则
 

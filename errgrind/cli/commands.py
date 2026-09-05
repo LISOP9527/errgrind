@@ -77,8 +77,8 @@ def _show_grilling_record(error):
         body.append(("", "\n\n"))
 
     if not body:
-        body = [("class:dim", "暂无 Grilling 对话记录")]
-    popup_content(body, title=f"Error #{error.id} - Grilling 记录")
+        body = [("class:dim", "暂无 Grill 诊断对话记录")]
+    popup_content(body, title=f"Error #{error.id} - Grill 诊断记录")
 
 
 def _run_grill_call(state: AppState, operation):
@@ -137,8 +137,8 @@ def _run_grilling(state: AppState, error):
             return
         _render_grill_response(result)
         if result.state == GrillState.COMPLETE:
-            successmsg("Grilling 思维审讯完成！状态已更新为待讲解")
-            if popup_confirm("Grilling 已完成，是否立即开始讲解？"):
+            successmsg("Grill 诊断完成！状态已更新为待讲解")
+            if popup_confirm("Grill 诊断已完成，是否立即开始讲解？"):
                 _run_teaching(state, result.error)
             return
 
@@ -151,8 +151,8 @@ def _run_grilling(state: AppState, error):
             )
             _render_grill_response(result)
             if result.state == GrillState.COMPLETE:
-                successmsg("Grilling 思维审讯完成！状态已更新为待讲解")
-                if popup_confirm("Grilling 已完成，是否立即开始讲解？"):
+                successmsg("Grill 诊断完成！状态已更新为待讲解")
+                if popup_confirm("Grill 诊断已完成，是否立即开始讲解？"):
                     _run_teaching(state, result.error)
                 return
         state.application().pause_grill(error.id)
@@ -161,7 +161,7 @@ def _run_grilling(state: AppState, error):
         errmsg(str(exc))
         _pause_grill_safely(state, error.id)
     except (KeyboardInterrupt, EOFError):
-        sysmsg("Grilling 对话已保存（中断）")
+        sysmsg("Grill 诊断对话已保存（中断）")
         _pause_grill_safely(state, error.id)
 
 
@@ -399,7 +399,7 @@ def _cmd_status(state, arg):
 
     body = [
         ("class:title", "📊 ErrGrind 错题分析看板\n\n"),
-        ("", "  ⏳ 待审讯 (pending-grill):  "),
+        ("", "  ⏳ 待诊断 (pending-grill):  "),
         ("class:badge-grill", f"{counts['pending-grill']:<3} "),
         ("", f"{make_bar(counts['pending-grill'], total)}\n"),
 
@@ -561,7 +561,7 @@ def _cmd_help(state, arg):
         ("📝 错题与演练工作流", [
             ("/record", "录入一个新的 error (进入 pending-grill)"),
             ("/ocr [路径]", "识别图片，校对后录入 error"),
-            ("/resume", "打开双栏工作台 (进行 grill 审讯 / teach 讲解)"),
+            ("/resume", "打开双栏工作台 (进行 Grill 诊断 / Teach 讲解)"),
             ("/drill", "结合近期 error 生成综合演练测试题"),
         ]),
         ("📊 状态与看板", [

@@ -1,5 +1,15 @@
 # 当前进度与验证记录
 
+## 2026-09-06：Structured Grill contract 与回顾性诊断边界
+
+- Review 修复：所有 Teach 返回值复用公开 Error 脱敏；Grill 解析、语义校验与 API 失败不向用户回显内部模型响应。repair 仍只在临时请求中进行。
+- partial 恢复在请求中使用当前 Grill Prompt，保留数据库中的历史 system message 和 Evidence message index；没有区分度的真实回答仍记录 observation，首轮 JSON 示例可以通过本地 validator。
+- Gemini `chat_json` 通过 `responseJsonSchema` 发送严格 JSON Schema；未在本轮调用真实生成 API。
+- `finish_supported` 必须有 Evidence 支持 best hypothesis，并保留非空的 `what_would_change_judgment`；最新用户回答的 Evidence 必须关联当前 Probe。
+- ordinary Drill 只接收 legacy NULL state 或 structured `supported` state；完整检查嵌套 Evidence/Probe/predictions、ID 引用、支持 best 的 Evidence 与可证伪条件，`undetermined` 和损坏 state 保守排除。limit 在筛选后生效；reasoning/variant 完成的合法记录均有 runtime 集成测试。
+- Grill Prompt 与设计明确以 authentic Error-time failure mechanism 为目标，retrospective reconstruction 是 noisy Evidence；不追踪 post-interference 因果状态链，允许 incidental learning effect。
+- 验证：取消 SOCKS proxy 环境变量后完整 offline suite 为 129 项通过；未取消时受环境缺少 `socksio` 影响，OCR OpenAI-compatible 测试失败。产品依赖未改动。`git diff --check` 与 Python compile check 通过；未调用真实模型 API。
+
 ## 2026-09-05：结构化 episode Grill diagnosis 与诊断变式 Probe
 
 - Grill 为每个 Error 保存可审计的 hypotheses、grounded Evidence 和 Probe state；模型每轮只输出 delta，Application 负责确定性 merge。

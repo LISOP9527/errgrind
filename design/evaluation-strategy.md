@@ -4,6 +4,8 @@
 
 ErrGrind 的最终目标是减少未来 Error，但当前可观察到的信号分属不同层级，不能互相替代。
 
+评估必须先固定 authentic Error anchor 与事件顺序。录题思路是 retrospective reconstruction，属于 noisy Evidence；用户当前的解释可能已经受到 Grill/Teach 影响，不能当作过去思路的无偏复现。干预后的观察可以保存并用于后续审计，但当前评估不追踪 post-interference state transition 或完整 causal chain，因此不把观察归因于 Teach 或 Drill。
+
 1. **流程完成**：用户录入、完成 Grill/Teach、做过 Drill。
 2. **模型有效**：Pattern 假设能够解释并预测后来独立发生的 Error。
 3. **行为迁移**：干预后，用户在新情境中更常表现出目标思维行为。
@@ -31,6 +33,8 @@ ErrGrind 的最终目标是减少未来 Error，但当前可观察到的信号�
 - 一条自然语言 Grill 摘要是否真的是稳定、可复现的 Pattern。
 
 因此，当前看板不得把“错题记录减少”“done 增多”或“Drill 正确率”显示成产品效果分数。
+
+Grill 的 primary objective 是诊断而非 Teach。评估 Grill 时可以记录 incidental learning effect 或用户负担，但不能要求 learning effect 为零，也不能把它当作诊断成功的充分条件。
 
 ## Pattern 预测验证：先独立发现，再关联
 
@@ -121,12 +125,15 @@ MVP 可以从低负担方案开始，而不是记录全部学习行为：
 - “经人工接受的 Assessment 将某个后来独立 Error 关联为可能复现某 Pattern”；
 - “用户在某次新 Drill 中展示/没有展示目标思维行为”。
 
+其中新的当前 Error 若无法归因原始 Error，只能作为 non-discriminating observation 保存，不能作为该 Pattern 的复现或反证。
+
 不能说：
 
 - “Pattern 已掌握/已治愈”；
 - “未来 Error 已减少”；
 - “Teach 或 Drill 导致了进步”；
 - “没有再次录入，所以 Pattern 已消失”。
+- “一次 episode diagnosis 已被 confirmed/verified/mastered”；长期 Pattern 仍需要未来 authentic、独立的 Evidence。
 
 当系统拥有经过审查的 Pattern、冻结 revision、独立 Future Assessment 和可信 opportunity 分母后，才可以报告带样本量、来源和限制的趋势。因果声明还需要更强的对照设计，不能仅凭前后变化。
 
@@ -141,6 +148,14 @@ MVP 可以从低负担方案开始，而不是记录全部学习行为：
 - Evidence 不足时是否诚实保留不确定性；
 - 从问题到 episode-level diagnosis 的问题数量与用户负担；
 - 用户疲劳和放弃通常发生在第几个问题之后。
+
+后续人工评估还应单独观察以下维度，不要在本轮为它们建立自动 benchmark：
+
+- **Past/current confusion**：是否把“用户现在知道”错误当成“用户当时知道”；
+- **Reconstruction quality**：是否围绕 Error-time reasoning 追问，而不是泛泛测量当前状态；
+- **Unnecessary interference chasing**：是否浪费问题重建看答案、他人解释或其它干预后的完整状态历史；
+- **Teaching leakage**：在获得关键 retrospective Evidence 前，是否直接塞入答案、机制或强提示；
+- **Useful dual-effect probe**：是否错误拒绝了一个可能有轻微 incidental learning effect、但对区分 hypotheses 有明显价值的 Probe。
 
 这些指标评估诊断质量与交互成本，不把一次 Grill 结果当作已确认的长期 Pattern。
 

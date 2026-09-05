@@ -15,6 +15,7 @@ from errgrind.application import (
     WorkflowModelError,
 )
 from errgrind.db.ops import Database
+from errgrind.application.grill_diagnosis import empty_diagnostic_state
 
 
 class _Prompts:
@@ -204,3 +205,64 @@ class ApplicationBoundaryTests(unittest.TestCase):
                         continue
                     for module in names:
                         self.assertFalse(any(module == item or module.startswith(item + ".") for item in forbidden), module)
+
+    def test_public_error_reads_hide_persisted_diagnostic_state(self):
+        error_id = self.db.create_error("题目", "思路")
+        diagnostic_state = empty_diagnostic_state()
+        diagnostic_state.update(
+            {
+                "diagnosis_status": "supported",
+                "hypotheses": [
+                    {"id": "H1", "claim": "机制一", "status": "supported"},
+                    {"id": "H2", "claim": "机制二", "status": "weakened"},
+                ],
+                "best_hypothesis_id": "H1",
+                "what_would_change_judgment": "相反的用户回忆",
+                "evidence": [
+                    {
+                        "id": "E1",
+                        "source_ref": "initial_user_thoughts",
+                        "quote": "思路",
+                        "interpretation": "原始思路提供支持",
+                        "supports": ["H1"],
+                        "contradicts": [],
+                        "probe_id": "",
+                    }
+                ],
+                "probes": [
+                    {
+                        "id": "P1",
+                        "type": "variant_problem",
+                        "question": "变式题",
+                        "target_hypothesis_ids": ["H1", "H2"],
+                        "discrimination_goal": "区分机制",
+                        "predictions": [
+                            {
+                                "hypothesis_id": "H1",
+                                "expected_observation": "隐藏预测",
+                            },
+                            {
+                                "hypothesis_id": "H2",
+                                "expected_observation": "另一个隐藏预测",
+                            },
+                        ],
+                        "answer_key": "隐藏答案",
+                        "preserved_mechanism": "触发机制",
+                        "surface_change": "表面变化",
+                    }
+                ],
+            }
+        )
+        raw_state = json.dumps(diagnostic_state, ensure_ascii=False)
+        self.db.save_grilling_progress(error_id, "[]", raw_state)
+
+        db_record = self.db.get_error(error_id)
+        self.assertEqual(db_record.grilling_diagnostic_state, raw_state)
+        self.assertIn("隐藏答案", db_record.grilling_diagnostic_state)
+
+        app = ErrGrindApplication(self.db, _LLM(), self.prompts)
+        public_record = app.get_error(error_id)
+        self.assertIsNone(public_record.grilling_diagnostic_state)
+        public_records = app.list_errors()
+        self.assertEqual(len(public_records), 1)
+        self.assertIsNone(public_records[0].grilling_diagnostic_state)

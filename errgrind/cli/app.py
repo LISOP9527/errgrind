@@ -301,7 +301,7 @@ def _show_welcome(state: AppState):
     )
 
     stats_panel = Panel(
-        f"[yellow]⏳ 待审讯: {counts['pending-grill']}[/yellow]   "
+        f"[yellow]⏳ 待诊断: {counts['pending-grill']}[/yellow]   "
         f"[cyan]📖 待讲解: {counts['pending-teach']}[/cyan]\n"
         f"[green]✅ 已完成: {counts['done']}[/green]   "
         f"[dim]🗂  总计: {counts['total']} 条[/dim]",

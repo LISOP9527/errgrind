@@ -4,6 +4,10 @@
 
 当前 `grilling_summary` 是针对一次 Error 得出的自然语言结论：它是 episode-level diagnosis，仍只是一个待验证的假设，不是跨 Error 的长期 Pattern。
 
+Pattern Observation 的 anchor 必须是用户确认的 authentic Error。录题时的思路是 retrospective reconstruction，属于 noisy Evidence；它与用户在 Grill 中对自己当前理解的陈述不能混为一谈。Teach/Drill 等干预后的观察可以留存，但不进行 post-interference state transition tracking，也不据此作因果归因。
+
+一次 Grill 结束后用户可能已经改变了理解；这不意味着该次历史 episode hypothesis 自动失效。它仍然是对当时 Error-time failure mechanism 的解释，是否具有长期 predictive value 要由未来独立 Evidence 验证。
+
 如果把每条摘要直接当成一个 Pattern，会产生大量措辞不同、机制相同的重复项；如果让 LLM 自动合并，又可能把表面相似、实际机制不同的 Error 错误归类。两种做法都会让 Thinking Model 看起来很完整，却失去可证伪性。
 
 因此，Pattern State 应逐层建立，而不是从一次 Grill 直接跳到“用户具有某个稳定 Pattern”。
@@ -22,7 +26,7 @@
 - `alternative_explanations`：仍未排除的其它解释及各自的支持/反对证据引用。
 
 Observation 必须关联原始 Error 和不可变的 Grill 对话版本。写入时要验证每个引用确实存在、角色为 `user`、原文片段与消息内容一致；没有可定位用户证据的推测只能保持 `proposed` 或 `uncertain`。Observation 是证据上的解释，不是用户的永久标签。
-诊断还应保留候选替代解释、支持与反对它们的 Evidence，以及哪些未来 Evidence 会改变当前判断。未来的结构化假设可以参与下一问题的选择，而不只是事后提取摘要。
+诊断还应保留候选替代解释、支持与反对它们的 Evidence，以及哪些未来 Evidence 会改变当前判断。若新的当前 Error 不能归因原始 Error，则只能作为可保存的 non-discriminating observation，不能推动该 Observation 的因果判断。未来的结构化假设可以参与下一问题的选择，而不只是事后提取摘要。
 
 ### Pattern Candidate
 
@@ -56,10 +60,12 @@ Assessment 必须引用明确的 Pattern revision 与 `assessment_baseline_at`�
 1. `/record` 当前通过用户主动提交题目和思路，暂视为用户确认的真实 Error；`/ocr` 只有用户完成字段校对并提交后才具有同样语义。`record` 与 `ocr` 只是采集方式，不是独立性证明；严格 recurrence 需要用户确认的 `learning_event_id` 或明确的 `unverified` 状态，并遵守去重规则。题目与参考答案是解释上下文，用户作答、思路和 Error 事件才是行为 Evidence。`drill` 始终是干预数据，不能进入 Future Error 统计；迁移后来源为 `unknown` 的记录，在用户确认前也不得进入 recurrence。
 2. LLM 可以提出 Observation、Candidate 关联和 Assessment 建议，但 State 转换由确定性 Policy 与可审查规则完成。
 3. 单次 Observation 不得显示为稳定 Pattern；单次 Action 成功不得显示为“已掌握”或“已解决”。
+   episode-level diagnosis 也不得写成 confirmed、verified 或 mastered Pattern；长期 Pattern 需要未来 authentic/independent Evidence。
 4. State 必须保留回到原始 Error、对话和模型输出的路径；删除原始 Evidence 时，相关推断必须失效、降级或删除。
 5. 不用“很久没出现”自动推断已解决。缺少 Evidence 与反向 Evidence 不是一回事。
 6. Pattern 的措辞应描述可迁移的思维机制，不能退化为知识点、题型标签、人格判断或“粗心”。
 7. 只观察 Error 没有学习机会总数这一分母，因此 recurrence 可以证伪“Pattern 已消失”，却不能单独证明 Error 发生率下降。
+8. Grill 的 primary objective 是 diagnosis 而非 Teach；不要求 incidental learning effect 为零，但不得把教学效果或干预后的表现当作原始机制的因果证明。
 
 ## 建议的数据模型
 

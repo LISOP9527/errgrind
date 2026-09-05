@@ -331,6 +331,105 @@ class GrillDiagnosisContractTests(unittest.TestCase):
                 with self.assertRaises(OutputContractError):
                     validate_turn_decision(decision, self.state, self.messages)
 
+    def test_finish_supported_requires_evidence_supporting_best(self):
+        state = json.loads(json.dumps(self.state, ensure_ascii=False))
+        state["evidence"][0]["supports"] = ["H2"]
+        decision = _answer_decision()
+        decision["new_evidence"][0]["supports"] = ["H2"]
+        decision["new_evidence"][0]["contradicts"] = []
+        with self.assertRaises(OutputContractError):
+            validate_turn_decision(decision, state, self.messages)
+
+    def test_finish_supported_accepts_old_evidence_supporting_best(self):
+        decision = _answer_decision()
+        decision["new_evidence"] = []
+        validated = validate_turn_decision(decision, self.state, self.messages)
+        self.assertEqual(validated.best_hypothesis_id, "H1")
+
+    def test_finish_supported_accepts_new_evidence_supporting_best(self):
+        state = json.loads(json.dumps(self.state, ensure_ascii=False))
+        state["evidence"][0]["supports"] = []
+        decision = _answer_decision()
+        validated = validate_turn_decision(decision, state, self.messages)
+        self.assertEqual(validated.new_evidence[0]["supports"], ["H1"])
+
+    def test_finish_supported_requires_what_would_change_judgment(self):
+        decision = _answer_decision()
+        decision["what_would_change_judgment"] = ""
+        with self.assertRaises(OutputContractError):
+            validate_turn_decision(decision, self.state, self.messages)
+
+    def test_latest_reasoning_answer_must_link_every_evidence_to_current_probe(self):
+        decision = _answer_decision()
+        decision["new_evidence"][0]["probe_id"] = ""
+        with self.assertRaises(OutputContractError):
+            validate_turn_decision(
+                decision,
+                self.state,
+                self.messages,
+                initial_user_thoughts="我直接套了公式",
+                require_latest_user_evidence=True,
+            )
+
+        decision = _answer_decision()
+        decision["new_evidence"].append(
+            {
+                "source_ref": "message:3",
+                "quote": "我还是直接套了公式",
+                "interpretation": "第二条解释仍来自同一回答",
+                "supports": [],
+                "contradicts": [],
+                "probe_id": "",
+            }
+        )
+        with self.assertRaises(OutputContractError):
+            validate_turn_decision(
+                decision,
+                self.state,
+                self.messages,
+                initial_user_thoughts="我直接套了公式",
+                require_latest_user_evidence=True,
+            )
+
+    def test_latest_reasoning_answer_cannot_link_to_an_old_probe(self):
+        next_probe = _answer_decision(action="reasoning_question")
+        next_probe["probe"] = _probe("第二个问题")
+        next_probe["summary"] = ""
+        second_state = apply_turn_decision(
+            self.state,
+            validate_turn_decision(next_probe, self.state, self.messages),
+        )
+        decision = _answer_decision()
+        decision["new_evidence"][0]["probe_id"] = "P1"
+        with self.assertRaises(OutputContractError):
+            validate_turn_decision(
+                decision,
+                second_state,
+                self.messages,
+                initial_user_thoughts="我直接套了公式",
+                require_latest_user_evidence=True,
+            )
+
+    def test_initial_thought_evidence_does_not_need_current_probe(self):
+        decision = _answer_decision()
+        decision["new_evidence"] = [
+            {
+                "source_ref": "initial_user_thoughts",
+                "quote": "我直接套了公式",
+                "interpretation": "录题时的原始思路",
+                "supports": ["H1"],
+                "contradicts": [],
+                "probe_id": "",
+            }
+        ]
+        validated = validate_turn_decision(
+            decision,
+            self.state,
+            self.messages,
+            initial_user_thoughts="我直接套了公式",
+        )
+        self.assertEqual(validated.new_evidence[0]["probe_id"], "")
+
     def test_state_null_is_distinct_from_an_empty_persisted_state(self):
         self.assertIsNone(load_diagnostic_state(None))
         empty = empty_diagnostic_state()

@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from errgrind.application.drill import JUDGE_SCHEMA, source_leak_terms as _source_leak_terms
+from errgrind.application import ErrGrindApplication
+from errgrind.application.grill_diagnosis import empty_diagnostic_state, load_diagnostic_state
 from errgrind.cli.commands import (
     _cmd_drill,
     _cmd_ocr,
@@ -27,6 +29,39 @@ class DatabaseWorkflowTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         self.temp_dir.cleanup()
+
+    @staticmethod
+    def _diagnostic_state(status):
+        state = empty_diagnostic_state()
+        state["diagnosis_status"] = status
+        state["hypotheses"] = [
+            {"id": "H1", "claim": "机制", "status": "supported"},
+            {"id": "H2", "claim": "另一机制", "status": "weakened"},
+        ]
+        state["best_hypothesis_id"] = "H1" if status == "supported" else ""
+        state["remaining_uncertainty"] = (
+            "" if status == "supported" else "主要解释仍无法区分"
+        )
+        if status == "supported":
+            state["what_would_change_judgment"] = "相反的独立行为证据"
+            state["evidence"] = [{
+                "id": "E1",
+                "source_ref": "initial_user_thoughts",
+                "quote": "我直接套了公式",
+                "interpretation": "原始思路支持该机制",
+                "supports": ["H1"],
+                "contradicts": [],
+                "probe_id": "",
+            }]
+        return state
+
+    def _complete_with_diagnostic_state(self, error_id, state):
+        self.db.complete_grilling(
+            error_id,
+            "[]",
+            "当前 Grill 摘要",
+            json.dumps(state, ensure_ascii=False),
+        )
 
     def test_error_moves_through_grill_and_teach(self):
         error_id = self.db.create_error("求 x", "先移项", "x = 2")
@@ -80,6 +115,178 @@ class DatabaseWorkflowTests(unittest.TestCase):
         self.assertEqual(context[0].error_id, second)
         self.assertEqual(context[0].question, "较新题目")
         self.assertEqual(context[0].grilling_summary, "较新摘要")
+
+    def test_structured_supported_and_undetermined_control_drill_eligibility(self):
+        supported = self.db.create_error("支持题")
+        undetermined = self.db.create_error("不确定题")
+        self._complete_with_diagnostic_state(
+            supported, self._diagnostic_state("supported")
+        )
+        self._complete_with_diagnostic_state(
+            undetermined, self._diagnostic_state("undetermined")
+        )
+
+        context_ids = [item.error_id for item in self.db.get_drill_context(10)]
+        self.assertIn(supported, context_ids)
+        self.assertNotIn(undetermined, context_ids)
+
+    def test_malformed_structured_state_is_not_treated_as_legacy_drill_context(self):
+        error_id = self.db.create_error("损坏题")
+        self.db.complete_grilling(error_id, "[]", "旧摘要", "不是 JSON")
+
+        self.assertEqual(self.db.get_drill_context(10), [])
+
+    def test_nested_malformed_structured_state_is_not_drill_context(self):
+        cases = [
+            ("evidence", [None]),
+            ("probes", [None]),
+            ("predictions", [None]),
+        ]
+        for field, value in cases:
+            state = self._diagnostic_state("supported")
+            if field == "predictions":
+                state["probes"] = [{
+                    "id": "P1", "type": "reasoning_question", "question": "怎么想",
+                    "target_hypothesis_ids": ["H1"], "discrimination_goal": "区分",
+                    "predictions": value, "answer_key": "",
+                    "preserved_mechanism": "", "surface_change": "",
+                }]
+            else:
+                state[field] = value
+            error_id = self.db.create_error(f"损坏 {field}")
+            self._complete_with_diagnostic_state(error_id, state)
+
+        self.assertEqual(self.db.get_drill_context(10), [])
+
+    def test_supported_state_requires_valid_references_and_actual_support(self):
+        cases = []
+        state = self._diagnostic_state("supported")
+        state["evidence"][0]["supports"] = ["H9"]
+        cases.append(state)
+        state = self._diagnostic_state("supported")
+        state["probes"] = [{
+            "id": "P1", "type": "reasoning_question", "question": "怎么想",
+            "target_hypothesis_ids": ["H9"], "discrimination_goal": "区分",
+            "predictions": [{"hypothesis_id": "H9", "expected_observation": "答"}],
+            "answer_key": "", "preserved_mechanism": "", "surface_change": "",
+        }]
+        cases.append(state)
+        state = self._diagnostic_state("supported")
+        state["evidence"] = []
+        cases.append(state)
+        state = self._diagnostic_state("supported")
+        state["what_would_change_judgment"] = ""
+        cases.append(state)
+        for index, invalid in enumerate(cases):
+            error_id = self.db.create_error(f"引用损坏 {index}")
+            self._complete_with_diagnostic_state(error_id, invalid)
+
+        self.assertEqual(self.db.get_drill_context(10), [])
+
+    def test_historical_probe_may_target_hypothesis_that_is_now_rejected(self):
+        state = self._diagnostic_state("supported")
+        state["hypotheses"][1]["status"] = "rejected"
+        state["probes"] = [{
+            "id": "P1", "type": "variant_problem", "question": "变式题",
+            "target_hypothesis_ids": ["H1", "H2"], "discrimination_goal": "区分",
+            "predictions": [
+                {"hypothesis_id": "H1", "expected_observation": "答一"},
+                {"hypothesis_id": "H2", "expected_observation": "答二"},
+            ],
+            "answer_key": "答案", "preserved_mechanism": "机制", "surface_change": "变化",
+        }]
+        error_id = self.db.create_error("历史 probe 题")
+        self._complete_with_diagnostic_state(error_id, state)
+
+        self.assertEqual(
+            [item.error_id for item in self.db.get_drill_context(10)], [error_id]
+        )
+
+    def test_runtime_completed_probe_states_remain_eligible_for_drill(self):
+        from unittest.mock import Mock
+
+        for kind in ("reasoning_question", "variant_problem"):
+            with self.subTest(kind=kind):
+                state = self._diagnostic_state("supported")
+                probe = {
+                    "question": "请给出你的判断", "target_hypothesis_ids": ["H1", "H2"],
+                    "discrimination_goal": "区分候选机制",
+                    "predictions": [
+                        {"hypothesis_id": "H1", "expected_observation": "表现一"},
+                        {"hypothesis_id": "H2", "expected_observation": "表现二"},
+                    ],
+                    "answer_key": "关键判断" if kind == "variant_problem" else "",
+                    "preserved_mechanism": "机制" if kind == "variant_problem" else "",
+                    "surface_change": "变化" if kind == "variant_problem" else "",
+                }
+                first = {
+                    "new_hypotheses": [{"id": h["id"], "claim": h["claim"]} for h in state["hypotheses"]],
+                    "hypothesis_status_updates": [],
+                    "new_evidence": [{k: v for k, v in state["evidence"][0].items() if k != "id"}],
+                    "next_action": kind, "probe": probe, "best_hypothesis_id": "",
+                    "remaining_uncertainty": "仍需核对", "what_would_change_judgment": "相反表现", "summary": "",
+                }
+                final = {
+                    **first, "new_hypotheses": [],
+                    "hypothesis_status_updates": [{"id": "H1", "status": "supported"}],
+                    "new_evidence": [{
+                        "source_ref": "message:3", "quote": "不记得了", "interpretation": "不足以区分",
+                        "supports": [], "contradicts": [], "probe_id": "P1",
+                    }],
+                    "next_action": "finish_supported",
+                    "probe": {k: [] if isinstance(v, list) else "" for k, v in probe.items()},
+                    "best_hypothesis_id": "H1", "summary": "当前最受 Evidence 支持的解释是机制一。",
+                }
+                llm = Mock()
+                llm.chat_json.side_effect = [first, final]
+                error_id = self.db.create_error("题目", "我直接套了公式")
+                app = ErrGrindApplication(self.db, llm, PromptManager())
+                app.start_or_resume_grill(error_id)
+                app.submit_grill_answer(error_id, "不记得了")
+                raw = self.db.get_error(error_id).grilling_diagnostic_state
+                self.assertEqual(load_diagnostic_state(raw)["diagnosis_status"], "supported")
+                self.assertIn(error_id, [item.error_id for item in self.db.get_drill_context(10)])
+
+                # Mutate one otherwise valid runtime state at a time.
+                for field, value in (
+                    ("id", "bad-id"),
+                    ("target_hypothesis_ids", ["H1", "H1"]),
+                    ("predictions", [None]),
+                    ("answer_key", "" if kind == "variant_problem" else "unexpected answer"),
+                ):
+                    invalid = json.loads(raw)
+                    invalid["probes"][0][field] = value
+                    self._complete_with_diagnostic_state(error_id, invalid)
+                    self.assertNotIn(error_id, [item.error_id for item in self.db.get_drill_context(10)])
+
+                if kind == "variant_problem":
+                    invalid = json.loads(raw)
+                    invalid["probes"][0]["target_hypothesis_ids"] = ["H1"]
+                    invalid["probes"][0]["predictions"] = invalid["probes"][0]["predictions"][:1]
+                    self._complete_with_diagnostic_state(error_id, invalid)
+                    self.assertNotIn(error_id, [item.error_id for item in self.db.get_drill_context(10)])
+
+    def test_drill_context_limit_applies_after_structured_eligibility_filter(self):
+        eligible_old = self.db.create_error("较早支持题")
+        self._complete_with_diagnostic_state(
+            eligible_old, self._diagnostic_state("supported")
+        )
+        undetermined = self.db.create_error("较新不确定题")
+        self._complete_with_diagnostic_state(
+            undetermined, self._diagnostic_state("undetermined")
+        )
+        malformed = self.db.create_error("较新损坏题")
+        self.db.complete_grilling(malformed, "[]", "摘要", "{bad json")
+        eligible_new = self.db.create_error("最新支持题")
+        self._complete_with_diagnostic_state(
+            eligible_new, self._diagnostic_state("supported")
+        )
+
+        context = self.db.get_drill_context(2)
+        self.assertEqual(
+            [item.error_id for item in context],
+            [eligible_new, eligible_old],
+        )
 
     def test_legacy_schema_migrates_without_guessing_origin(self):
         path = Path(self.temp_dir.name) / "legacy.db"

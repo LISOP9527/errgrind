@@ -148,7 +148,11 @@ class GeminiClient:
         config = dict(kwargs.pop("generation_config", {}))
         config["response_mime_type"] = "application/json"
         if output_schema is not None:
-            config["response_schema"] = output_schema
+            # Our contracts use JSON Schema (including additionalProperties),
+            # not the narrower OpenAPI Schema accepted by responseSchema.
+            config.pop("response_schema", None)
+            config.pop("responseSchema", None)
+            config["responseJsonSchema"] = output_schema
         config.setdefault("temperature", 0.2)
         retry_messages = list(messages)
         last_error = None

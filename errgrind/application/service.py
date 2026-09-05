@@ -9,6 +9,7 @@ from .contracts import (
     DrillPreparation,
     DrillStage,
     GrillResult,
+    public_error,
 )
 from .drill import DrillWorkflow
 from .grill import GrillWorkflow
@@ -25,10 +26,13 @@ class ErrGrindApplication:
         self.cfg = cfg if cfg is not None else {}
 
     def get_error(self, error_id: int):
-        return self.db.get_error(error_id)
+        return public_error(self.db.get_error(error_id))
 
     def list_errors(self):
-        return self.db.list_all_errors()
+        return [
+            public_error(error)
+            for error in self.db.list_all_errors()
+        ]
 
     def delete_error(self, error_id: int) -> None:
         self.db.delete_error(error_id)

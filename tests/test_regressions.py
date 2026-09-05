@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from errgrind.application.grill import grilling_summary as _grilling_summary
 from errgrind.application.grill import is_grilling_complete as _is_grilling_complete
+from errgrind.application.grill_diagnosis import GRILL_TURN_SCHEMA
 from errgrind.config import prepare_database_path
 from errgrind.cli.ui import (
     _format_math_for_terminal,
@@ -83,6 +84,13 @@ class PromptFormattingTests(unittest.TestCase):
         self.assertIn('"new_hypotheses"', grill)
         self.assertIn("`variant_problem`", grill)
         self.assertNotIn("[GRILLING_END]", grill)
+        self.assertIn("Error 发生当时的 failure mechanism", grill)
+        self.assertIn("retrospective reconstruction", grill)
+        self.assertIn("首要目标是诊断，不是 Teach", grill)
+        self.assertIn("non-discriminating Evidence", grill)
+        self.assertIn('"source_ref": "initial_user_thoughts"', grill)
+        self.assertNotIn('"source_ref": "message:3"', grill)
+        self.assertIn('"new_evidence": []', grill)
         teach = prompts.load("teach.md")
         self.assertIn("episode-level diagnosis", teach)
         self.assertNotIn("把知识点和 Error Pattern 联系起来", teach)
@@ -112,8 +120,42 @@ class PromptFormattingTests(unittest.TestCase):
         self.assertIn("不能仅因方法不同而判错", judge)
         self.assertIn("思路证据不足", judge)
 
+    def test_grill_cli_uses_neutral_diagnostic_wording(self):
+        commands = (Path(__file__).parents[1] / "errgrind" / "cli" / "commands.py").read_text()
+
+        self.assertNotIn("思维审讯", commands)
+        self.assertIn("Grill 诊断完成", commands)
+        self.assertIn("Grill 诊断对话已保存", commands)
+
 
 class JsonRetryTests(unittest.TestCase):
+    def test_gemini_sends_strict_contract_as_json_schema_on_wire(self):
+        client = GeminiClient(api_key="test-key", model="test-model", max_retries=1)
+        response = Mock()
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}]
+        }
+        # Existing generation settings are preserved without sending both schema dialects.
+        settings = {"response_schema": {"type": "OBJECT"}, "temperature": 0.1}
+        with patch("errgrind.llm.gemini.httpx.post", return_value=response) as post:
+            result = client.chat_json(
+                [{"role": "user", "content": "JSON"}],
+                output_schema=GRILL_TURN_SCHEMA,
+                max_json_attempts=1,
+                generation_config=settings,
+            )
+        self.assertEqual(result, {"ok": True})
+        post.assert_called_once()
+        body = post.call_args.kwargs["json"]
+        config = body["generationConfig"]
+        self.assertEqual(config["responseJsonSchema"], GRILL_TURN_SCHEMA)
+        self.assertEqual(config["response_mime_type"], "application/json")
+        self.assertEqual(config["temperature"], 0.1)
+        self.assertNotIn("response_schema", config)
+        self.assertNotIn("responseSchema", config)
+        self.assertNotIn("max_json_attempts", body)
+        self.assertEqual(settings["response_schema"], {"type": "OBJECT"})
+
     def test_openai_compatible_client_retries_invalid_json(self):
         client = object.__new__(LLMClient)
         client.max_retries = 2

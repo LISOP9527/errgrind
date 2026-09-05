@@ -1,10 +1,15 @@
 """Small, UI-neutral contracts for ErrGrind's reusable workflows."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Optional
 
 from ..models.types import DrillAttemptResult, ErrorRecord
+
+
+def public_error(error: Optional[ErrorRecord]) -> Optional[ErrorRecord]:
+    """Return the frontend view without the private Grill audit ledger."""
+    return replace(error, grilling_diagnostic_state=None) if error is not None else None
 
 
 class ApplicationError(Exception):

@@ -4,6 +4,8 @@
 
 ErrGrind 不是 AI 错题本。Error 提供关于思考过程的 Evidence；Grill 针对多个候选解释收集有区分度的新 Evidence，形成本次 Error 的 episode-level diagnosis；跨 Error 或后续行为的独立 Evidence 才能支持可证伪、可更新的长期 Pattern，并据此设计 Action，最终减少未来 Error。解释某道题的错误是诊断手段，不是最终目标。
 
+原始 authentic Error 是本次诊断的 anchor。录题时的思路是对过去思考的 retrospective reconstruction，属于可能遗漏或偏差的 noisy Evidence；应区分过去的思路与用户在当前对话中的理解。Grill 诊断 Error-time failure mechanism，不追踪 Teach/Drill 等干预后的 post-interference causal chain；相关观察可以保存供审计，但不能据此作因果归因。Grill 的首要目标是 diagnosis 而非 Teach，不要求完全没有 incidental learning effect。一次 episode diagnosis 不能升级为 confirmed、verified 或 mastered Pattern；长期 Pattern 仍需未来真实且独立的 Evidence。
+
 当前 MVP 只针对数学题。Prompt、测试和设计讨论均以数学题为范围，除非用户明确扩大范围。
 
 概念阶段的方向是：
@@ -48,6 +50,7 @@ CLI / TUI 或未来其他 frontend
 - Application/Core 不得依赖 `rich`、`prompt_toolkit`、`errgrind.cli`、CLI state、popup、console rendering 或 key binding。跨边界返回 dataclass、enum、typed object 或简单 domain model，并用可区分的业务异常表达失败。
 - SQLite 中的 ErrGrind 会话和业务记录是工作流的事实来源。Application 必须在可失败的模型调用前保存已接收的 bootstrap/用户输入，并统一维护上述状态与持久化不变量。UI 不得把直接 CRUD 当作完成 workflow 的业务 API。
 - 为流式显示或交互进度提供的可选 callback，只能传递 token、生命周期或阶段事件；Application 不得接收或生成终端渲染对象。
+- Application 的所有公开返回值（包括 Teach）与用户可见异常都必须隐藏 Grill 的内部诊断账本、variant 答案和预测；模型原始结构化输出只能用于内部校验和 repair。
 - 优先保持当前实现所需的最小解耦。不为架构形式引入尚无现实消费者的 repository interface、DI framework 或复杂 class hierarchy。
 - 未来 MCP、GUI 或 Mobile 都应作为 `ErrGrindApplication` 的薄 adapter，不得 import CLI、模拟终端交互或复制 workflow。本原则不表示现在需要实现 MCP SDK、MCP server 或 MCP-specific contract。
 - 修改 Grill、Teach、Drill、会话恢复、状态转换或 Drill 时，优先直接测试 application boundary，同时保留必要的 CLI integration tests，确认 adapter 仍正确处理输入、渲染与中断。

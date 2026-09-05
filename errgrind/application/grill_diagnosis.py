@@ -710,8 +710,13 @@ def validate_turn_decision(
             _fail("finish_supported 必须提供 best_hypothesis_id")
         if hypotheses[best]["status"] != "supported":
             _fail("finish_supported 的 best hypothesis status 必须是 supported")
-        if not (current_state["evidence"] or new_evidence):
-            _fail("finish_supported 必须有至少一条 Evidence")
+        if not any(
+            best in item["supports"]
+            for item in [*current_state["evidence"], *new_evidence]
+        ):
+            _fail("finish_supported 的 best hypothesis 必须得到 Evidence 支持")
+        if not what_changes.strip():
+            _fail("finish_supported 必须说明 what_would_change_judgment")
         if "当前最受 Evidence 支持的解释" not in summary:
             _fail("finish_supported 的 summary 必须说明当前最受 Evidence 支持的解释")
     else:
@@ -728,16 +733,12 @@ def validate_turn_decision(
             _fail("每次真实用户回答都必须新增一条引用最新 user message 的 Evidence")
         current_probe_id = current_state["current_probe_id"]
         if current_probe_id:
-            current_probe = next(
-                item
-                for item in current_state["probes"]
-                if item["id"] == current_probe_id
-            )
-            if (
-                current_probe["type"] == "variant_problem"
-                and not any(item["probe_id"] == current_probe_id for item in new_evidence)
-            ):
-                _fail("variant 回答的 Evidence 必须关联当前 variant probe")
+            for item in new_evidence:
+                if (
+                    item["source_ref"] == latest
+                    and item["probe_id"] != current_probe_id
+                ):
+                    _fail("最新用户回答的 Evidence 必须关联当前 Probe")
 
     return GrillTurnDecision(
         new_hypotheses=new_hypotheses,
