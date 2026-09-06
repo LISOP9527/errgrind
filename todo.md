@@ -1,5 +1,12 @@
 # 当前进度与验证记录
 
+## 2026-09-06：Codex 模型选择与 reasoning effort
+
+- `/model` 在选择 Codex 模型后配置 effort；新增 `/effort` 与 `/config` 入口，保存 `reasoning_effort`，并传给普通、流式、JSON、OCR 请求。默认不覆盖 Codex 自身设置。
+- 模型列表原本已通过 SDK 动态查询；现保留 effort 元数据，始终提供手动模型 ID 入口。目录失败时给出提示，未知模型的 effort 可手动输入。
+- 本机实际目录查询未返回 Astra（包括隐藏模型、无下一页）；实际 Sol 元数据正常包含 low、medium、high、xhigh、max、ultra。未调用真实生成 API。
+- 配置取消保留旧状态；保存失败关闭新 client。完整离线回归 141 项通过；真实目录读取另行验证元数据解析。`git diff --check` 通过。
+
 ## 2026-09-06：Structured Grill contract 与回顾性诊断边界
 
 - Review 修复：所有 Teach 返回值复用公开 Error 脱敏；Grill 解析、语义校验与 API 失败不向用户回显内部模型响应。repair 仍只在临时请求中进行。

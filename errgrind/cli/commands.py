@@ -36,6 +36,24 @@ COMMANDS: dict = {}
 COMMAND_DESCRIPTIONS: dict[str, str] = {}
 
 
+def _commit_llm_change(state, candidate, new_llm, save_config):
+    """Persist and install a replacement client without leaking on failure."""
+    try:
+        save_config(candidate)
+    except (Exception, KeyboardInterrupt):
+        close = getattr(new_llm, "close", None)
+        if callable(close):
+            close()
+        raise
+    previous_llm = state.llm
+    state.cfg.clear()
+    state.cfg.update(candidate)
+    state.llm = new_llm
+    close_previous = getattr(previous_llm, "close", None)
+    if callable(close_previous):
+        close_previous()
+
+
 def _register(name, description, aliases=None):
     aliases = aliases or []
     COMMAND_DESCRIPTIONS[name] = description
@@ -456,6 +474,7 @@ def _cmd_config(state, arg):
         ("drill_context_n", f"drill_context_n = {state.cfg.get('drill_context_n', 10)}"),
         ("grill_max_turns", f"grill_max_turns = {state.cfg.get('grill_max_turns', 30)}"),
         ("provider", f"provider = {state.cfg.get('provider', '?')}"),
+        ("reasoning_effort", f"reasoning_effort = {state.cfg.get('reasoning_effort') or '默认'}"),
     ]
 
     while True:
@@ -519,19 +538,51 @@ def _cmd_config(state, arg):
                 candidate = dict(state.cfg)
                 _change_provider(candidate)
                 new_llm = _make_llm(candidate)
-                save_config(candidate)
-
-                previous_llm = state.llm
-                state.cfg.clear()
-                state.cfg.update(candidate)
-                state.llm = new_llm
-                close_previous = getattr(previous_llm, "close", None)
-                if callable(close_previous):
-                    close_previous()
+                _commit_llm_change(state, candidate, new_llm, save_config)
                 successmsg(f"provider 已切换为 {state.cfg['provider']}")
                 items[2] = (key, f"provider = {state.cfg['provider']}")
+                items[3] = (
+                    "reasoning_effort",
+                    f"reasoning_effort = {state.cfg.get('reasoning_effort') or '默认'}",
+                )
             except (KeyboardInterrupt, EOFError):
                 sysmsg("取消")
+
+        elif key == "reasoning_effort":
+            if state.cfg.get("provider") != "codex":
+                sysmsg("reasoning effort 仅适用于 Codex")
+                continue
+            try:
+                candidate = dict(state.cfg)
+                from .app import _fetch_codex_models, _select_codex_effort
+                _fetch_codex_models()
+                _select_codex_effort(candidate)
+                new_llm = _make_llm(candidate)
+                _commit_llm_change(state, candidate, new_llm, save_config)
+                shown = candidate.get("reasoning_effort") or "默认"
+                successmsg(f"reasoning_effort 已设置为 {shown}")
+                items[3] = (key, f"reasoning_effort = {shown}")
+            except (KeyboardInterrupt, EOFError):
+                sysmsg("取消")
+
+
+@_register("effort", "调整 Codex reasoning effort")
+def _cmd_effort(state, arg):
+    if state.cfg.get("provider") != "codex":
+        sysmsg("reasoning effort 仅适用于 Codex")
+        return
+    from ..config import save as save_config
+    from .app import _fetch_codex_models, _select_codex_effort, _make_llm
+
+    try:
+        candidate = dict(state.cfg)
+        _fetch_codex_models()
+        _select_codex_effort(candidate)
+        new_llm = _make_llm(candidate)
+        _commit_llm_change(state, candidate, new_llm, save_config)
+        successmsg(f"reasoning_effort 已设置为 {candidate.get('reasoning_effort') or '默认'}")
+    except (KeyboardInterrupt, EOFError):
+        sysmsg("取消")
 
 
 @_register("model", "切换 AI 模型")
@@ -543,15 +594,7 @@ def _cmd_model(state, arg):
         candidate = dict(state.cfg)
         _select_model(candidate)
         new_llm = _make_llm(candidate)
-        save_config(candidate)
-
-        previous_llm = state.llm
-        state.cfg.clear()
-        state.cfg.update(candidate)
-        state.llm = new_llm
-        close_previous = getattr(previous_llm, "close", None)
-        if callable(close_previous):
-            close_previous()
+        _commit_llm_change(state, candidate, new_llm, save_config)
         successmsg(f"model 已切换为 {state.cfg.get('model', '?')}")
     except (KeyboardInterrupt, EOFError):
         sysmsg("取消")
@@ -572,6 +615,7 @@ def _cmd_help(state, arg):
         ("⚙️ 系统与模型配置", [
             ("/config", "调整 drill 条数、grill 轮数或 AI 提供商"),
             ("/model", "快捷切换 AI 模型（Gemini / DeepSeek / OpenCode / Codex）"),
+            ("/effort", "调整 Codex reasoning effort"),
             ("/help", "显示本命令帮助指南"),
             ("/exit", "退出 ErrGrind 应用"),
         ])

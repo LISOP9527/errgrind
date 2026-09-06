@@ -16,7 +16,14 @@ ErrGrind 是本地 Python CLI，不需要成为 OAuth 凭据管理器，也不�
 - 新增 `codex` provider，通过 OpenAI 官方 `openai-codex` Python SDK 启动本地
   Codex app-server。
 - ChatGPT 浏览器登录、device-code 登录、凭据保存和 token 刷新全部交给
-  app-server；ErrGrind 配置文件只保存 provider 和 model，不保存 Codex token。
+  app-server；ErrGrind 配置文件保存 provider、model 和 reasoning_effort，不保存 Codex token。
+- 模型与其支持的 reasoning effort 从 app-server 的 `model/list` 获取，不维护模型或
+  effort 白名单。目录由 SDK 配套 runtime 提供，不能保证每次都刷新到远端最新目录。
+  模型选择始终允许手动输入 ID，供目录尚未收录的新模型使用；不把目录缺失解释为不可用。
+- `/model` 同时选择 Codex 模型与 effort，`/effort` 和 `/config` 可单独调整 effort。
+  未指定 effort 时不覆盖 Codex 默认设置；明确选择后在普通、流式、JSON 和 OCR
+  的每次 `turn` 请求中传入 `effort`。切换模型时重新选择，避免沿用不兼容的档位。
+  目录不可用或模型未收录时，明确告知无法校验，并允许手动输入 effort 或采用默认。
 - 每次 ErrGrind 请求创建一个只读、拒绝所有执行审批的 ephemeral Codex thread，
   禁止 shell、文件修改和网络工具，把 Codex 仅作为文本模型使用。
 - 现有消息历史在适配器边界转换，业务层和数据库继续保存标准
@@ -48,3 +55,5 @@ ErrGrind 是本地 Python CLI，不需要成为 OAuth 凭据管理器，也不�
 - Codex 本质上以 agent thread 为中心。适配器必须持续用离线回归测试约束消息转换、
   流式 delta、JSON 输出、登录取消和失败重试。
 - SDK 升级需要先验证公开 API 和回归测试，再放宽 `pyproject.toml` 中的版本上限。
+- 2026-09-06 本机配套 runtime 的目录查询（包括隐藏模型）未返回 Astra，且没有下一页。
+  这是目录返回值的观察，不代表账户不能调用 Astra；手动 ID 入口不承诺模型访问权限。

@@ -31,6 +31,7 @@ PROVIDERS = {
 }
 
 OLD_ZEN_URL = "https://opencode.ai/zen/v1"
+_CODEX_MODEL_METADATA = {}
 
 
 def _fetch_gemini_models(api_key):
@@ -58,6 +59,12 @@ def _fetch_llm_models(base_url, api_key):
 
 
 def _fetch_codex_models():
+    """Return the live Codex model ids and default (legacy two-tuple API).
+
+    Metadata is retained for the effort picker, while callers that only need
+    the historical ``(models, default)`` result remain compatible.
+    """
+    global _CODEX_MODEL_METADATA
     client = None
     try:
         client = CodexClient(model=DEFAULT_CODEX_MODEL)
@@ -65,19 +72,104 @@ def _fetch_codex_models():
         entries = getattr(response, "data", response if isinstance(response, list) else [])
         models = []
         default_model = ""
+        metadata = {}
         for entry in entries:
-            model = getattr(entry, "model", None) or getattr(entry, "id", None)
+            model = _entry_value(entry, "model") or _entry_value(entry, "id")
             if not isinstance(model, str) or not model:
                 continue
             models.append(model)
-            if getattr(entry, "is_default", False):
+            if _entry_value(entry, "is_default"):
                 default_model = model
+            metadata[model] = {
+                "supported_reasoning_efforts": _effort_values(
+                    _entry_value(entry, "supported_reasoning_efforts")
+                ),
+                "default_reasoning_effort": _effort_value(
+                    _entry_value(entry, "default_reasoning_effort")
+                ),
+            }
+        _CODEX_MODEL_METADATA = metadata
         return list(dict.fromkeys(models)), default_model
     except Exception:
+        _CODEX_MODEL_METADATA = {}
+        sysmsg("Codex 模型目录获取失败，将允许手动输入模型 ID")
         return [], ""
     finally:
         if client is not None:
             client.close()
+
+
+def _entry_value(entry, name, default=None):
+    if isinstance(entry, dict):
+        return entry.get(name, default)
+    return getattr(entry, name, default)
+
+
+def _effort_value(value):
+    """Unwrap SDK RootModel and enum values to their wire representation."""
+    if value is None:
+        return None
+    value = getattr(value, "root", value)
+    value = getattr(value, "value", value)
+    return value if isinstance(value, str) else str(value)
+
+
+def _effort_values(value):
+    if value is None:
+        return []
+    value = getattr(value, "root", value)
+    if isinstance(value, str):
+        return [_effort_value(value)]
+    try:
+        values = []
+        for item in value:
+            # The SDK exposes entries such as ReasoningEffortOption with a
+            # ``reasoning_effort`` enum field; unwrap that before the enum.
+            item = _entry_value(item, "reasoning_effort", item)
+            item = _effort_value(item)
+            if item and item not in values:
+                values.append(item)
+        return values
+    except TypeError:
+        return []
+
+
+def _fetch_codex_model_metadata(model=None):
+    """Read discovered effort metadata, optionally for one model."""
+    if model is None:
+        return dict(_CODEX_MODEL_METADATA)
+    return dict(_CODEX_MODEL_METADATA.get(model, {}))
+
+
+def _select_codex_effort(cfg, metadata=None):
+    if cfg.get("provider") != "codex":
+        return
+    metadata = metadata if metadata is not None else _fetch_codex_model_metadata(cfg.get("model"))
+    supported = metadata.get("supported_reasoning_efforts") or []
+    default = metadata.get("default_reasoning_effort")
+    options = ["默认（使用模型默认 effort）"] + supported
+    if not supported:
+        options.append("手动输入 effort")
+    idx = select_from_list(options, lambda x: x, title="选择 Codex reasoning effort")
+    if idx is None:
+        raise KeyboardInterrupt
+    if idx == 0:
+        cfg["reasoning_effort"] = None
+        shown = default or "模型默认"
+    elif not supported:
+        val = popup_input(
+            "输入 reasoning effort",
+            "目录未提供可校验选项；可输入任意 effort，留空使用模型默认：",
+            multiline=False,
+        )
+        if val is None:
+            raise KeyboardInterrupt
+        cfg["reasoning_effort"] = val.strip() or None
+        shown = cfg["reasoning_effort"] or (default or "模型默认")
+    else:
+        cfg["reasoning_effort"] = supported[idx - 1]
+        shown = cfg["reasoning_effort"]
+    return shown
 
 
 def _codex_logged_in(account_response):
@@ -161,19 +253,29 @@ def _select_model(cfg):
         if default_model in models:
             models.remove(default_model)
             models.insert(0, default_model)
+        model_options = [*models, "手动输入模型 ID"]
         idx = select_from_list(
-            models,
+            model_options,
             lambda m: f"{m}（推荐）" if m == default_model else m,
             title="选择 AI 模型",
         )
         if idx is None:
             raise KeyboardInterrupt
-        cfg["model"] = models[idx]
+        if idx == len(model_options) - 1:
+            val = popup_input("选择模型", "请输入模型 ID：", multiline=False)
+            if val is None:
+                raise KeyboardInterrupt
+            cfg["model"] = val.strip() or default_model
+        else:
+            cfg["model"] = models[idx]
     else:
         val = popup_input("选择模型", "无法获取模型列表，请手动输入模型 ID：", multiline=False)
         if val is None:
             raise KeyboardInterrupt
         cfg["model"] = val.strip() or default_model
+
+    if provider == "codex":
+        _select_codex_effort(cfg, _fetch_codex_model_metadata(cfg.get("model")))
 
 
 def _change_provider(cfg):
@@ -222,7 +324,10 @@ def _make_llm(cfg):
             model=cfg.get("model", "deepseek-v4-flash"),
         )
     if provider == "codex":
-        client = info[1](model=cfg.get("model", DEFAULT_CODEX_MODEL))
+        client = info[1](
+            model=cfg.get("model", DEFAULT_CODEX_MODEL),
+            reasoning_effort=cfg.get("reasoning_effort"),
+        )
         try:
             if not _codex_logged_in(client.account(refresh_token=True)):
                 raise CodexError("ChatGPT Codex 尚未登录，请在 /config 中重新选择 codex")
@@ -254,7 +359,7 @@ def _ensure_config():
                 cfg.pop(key, None)
             save_config(cfg)
         # Codex keeps OAuth credentials in its own app-server/CLI store.  A
-        # saved ErrGrind config only records the provider and model, so make
+        # saved ErrGrind config contains no authentication state, so make
         # an unauthenticated first run useful instead of failing before the
         # command loop (where /config would otherwise be unreachable).
         _configure_codex_login()

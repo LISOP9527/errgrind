@@ -87,6 +87,31 @@ class CodexProviderTests(unittest.TestCase):
         FakeLocalImageInput,
     )
 
+    def test_effort_reaches_chat_stream_and_json_turns(self):
+        for effort in (None, "high", "ultra", "future-effort"):
+            with self.subTest(effort=effort):
+                sdk = FakeSDK(FakeThread(text='{"ok": true}'))
+                with CodexClient(sdk=sdk, reasoning_effort=effort) as client:
+                    with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
+                        client.chat([])
+                        client.stream_chat([], lambda token: None)
+                        client.chat_json([])
+                self.assertEqual(len(sdk.thread.run_calls), 3)
+                for _, kwargs in sdk.thread.run_calls:
+                    if effort is None:
+                        self.assertNotIn("effort", kwargs)
+                    else:
+                        self.assertEqual(kwargs["effort"], effort)
+
+    def test_per_call_effort_overrides_configured_effort(self):
+        sdk = FakeSDK(FakeThread())
+        with CodexClient(sdk=sdk, reasoning_effort="high") as client:
+            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
+                client.chat([], effort="low")
+                client.stream_chat([], lambda token: None, effort=None)
+        self.assertEqual(sdk.thread.run_calls[0][1]["effort"], "low")
+        self.assertIsNone(sdk.thread.run_calls[1][1]["effort"])
+
     def test_chat_uses_read_only_and_denies_approvals(self):
         sdk = FakeSDK(FakeThread())
         client = CodexClient(sdk=sdk)
@@ -169,7 +194,7 @@ class CodexProviderTests(unittest.TestCase):
                 )
             )
             sdk = FakeSDK(thread)
-            client = CodexClient(sdk=sdk)
+            client = CodexClient(sdk=sdk, reasoning_effort="high")
             self.addCleanup(client.close)
 
             with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
@@ -181,6 +206,7 @@ class CodexProviderTests(unittest.TestCase):
         self.assertIsInstance(turn_input[1], FakeLocalImageInput)
         self.assertEqual(turn_input[1].path, str(image_path.resolve()))
         self.assertEqual(turn_kwargs["output_schema"], OCR_OUTPUT_SCHEMA)
+        self.assertEqual(turn_kwargs["effort"], "high")
         self.assertEqual(sdk.calls[0]["sandbox"], "read")
         self.assertEqual(sdk.calls[0]["approval_mode"], "deny")
 
@@ -207,7 +233,10 @@ class CodexProviderTests(unittest.TestCase):
         original = app.PROVIDERS["codex"]
         with patch.dict(app.PROVIDERS, {"codex": (original[0], FakeClient, original[2])}):
             client = app._make_llm({"provider": "codex", "model": "gpt-5"})
-        self.assertEqual(client.kwargs, {"model": "gpt-5"})
+        self.assertEqual(
+            client.kwargs,
+            {"model": "gpt-5", "reasoning_effort": None},
+        )
 
     def test_minimal_codex_config_gets_codex_model_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -69,8 +69,10 @@ class CodexClient:
         max_retries: int = 3,
         sdk: Any | None = None,
         codex_bin: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self.max_retries = max(1, max_retries)
         self._workspace = tempfile.TemporaryDirectory(prefix="errgrind-codex-")
         self._closed = False
@@ -197,6 +199,7 @@ class CodexClient:
                     ],
                     model=self.model,
                     output_schema=OCR_OUTPUT_SCHEMA,
+                    **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
                 )
                 result = turn.run()
                 return parse_ocr_result(_result_text(result))
@@ -221,6 +224,8 @@ class CodexClient:
                 thread, prompt = self._new_thread(messages)
                 turn_kwargs = dict(kwargs)
                 turn_kwargs.setdefault("model", self.model)
+                if self.reasoning_effort:
+                    turn_kwargs.setdefault("effort", self.reasoning_effort)
                 turn = thread.turn(prompt, **turn_kwargs)
                 result = turn.run()
                 return _result_text(result)
@@ -246,6 +251,8 @@ class CodexClient:
                 thread, prompt = self._new_thread(messages)
                 turn_kwargs = dict(kwargs)
                 turn_kwargs.setdefault("model", self.model)
+                if self.reasoning_effort:
+                    turn_kwargs.setdefault("effort", self.reasoning_effort)
                 turn = thread.turn(prompt, **turn_kwargs)
                 for event in turn.stream():
                     token = _text_from_event(event)

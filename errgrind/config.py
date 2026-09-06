@@ -38,6 +38,7 @@ def prepare_database_path(
 DEFAULT_CONFIG = {
     "provider": "gemini",
     "model": DEFAULT_GEMINI_MODEL,
+    "reasoning_effort": None,
     "api_key": "",
     "drill_context_n": 10,
     "grill_max_turns": 30,
