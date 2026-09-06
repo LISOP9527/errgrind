@@ -74,7 +74,7 @@ Grill 的首要目标是诊断，不是 Teach；它不要求对用户产生零�
 {{
   "new_hypotheses": [{{"id": "H1", "claim": "候选机制一"}}, {{"id": "H2", "claim": "候选机制二"}}],
   "hypothesis_status_updates": [{{"id": "H1", "status": "plausible"}}],
-  "new_evidence": [{{"source_ref": "initial_user_thoughts", "quote": "...", "interpretation": "...", "supports": ["H1"], "contradicts": [], "probe_id": ""}}],
+  "new_evidence": [],
   "next_action": "reasoning_question",
   "probe": {{
     "question": "...",
@@ -91,6 +91,8 @@ Grill 的首要目标是诊断，不是 Teach；它不要求对用户产生零�
   "summary": ""
 }}
 ```
+
+当存在可引用的用户 Evidence 时，`new_evidence` 中每个 evidence item 必须包含 `source_ref`、`quote`、`interpretation`、`supports`、`contradicts` 和 `probe_id` 六个字段（例如 `"source_ref": "initial_user_thoughts"` 或 `"source_ref": "message:N"`）。`quote` 必须从实际提供的用户文本中逐字精确复制（verbatim substring），严禁填写占位符、概括或修改原文。
 
 当前诊断 state 是事实来源。不要重写旧 hypothesis 的 claim，不要删除旧 Evidence 或 Probe；本轮只输出 delta。不要引用临时诊断上下文本身作为 Evidence。应用程序会分配 E/P ID、合并 state、执行状态转换并决定用户可见文本。
 

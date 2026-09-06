@@ -164,6 +164,8 @@ class GrillWorkflow:
             raise InvalidWorkflowState("Grill 尚未开始，请先开始或恢复 Grill")
         if messages[-1].get("role") != "assistant":
             raise InvalidWorkflowState("当前正在等待 Grill 的模型回复")
+        if not answer.strip():
+            raise InvalidWorkflowState("Grill 回答不能为空；如果不记得，可以直接输入“不记得”。")
         diagnostic_state_json = error.grilling_diagnostic_state
         diagnostic_state = load_diagnostic_state(diagnostic_state_json)
         messages.append({"role": "user", "content": answer})

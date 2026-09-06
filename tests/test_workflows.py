@@ -1045,6 +1045,26 @@ class ConversationWorkflowTests(unittest.TestCase):
         run_teaching.assert_called_once()
         self.assertEqual(run_teaching.call_args.args[1].status, "pending-teach")
 
+    def test_blank_grill_answer_surfaces_workflow_error_without_crashing(self):
+        error_id = self.db.create_error("求 x", "先移项")
+        llm = _ConversationLLM(["当时为什么先移项？"])
+        state = AppState(db=self.db, llm=llm, prompts=PromptManager())
+        state.application().start_or_resume_grill(error_id)
+        before = self.db.get_error(error_id)
+
+        with (
+            patch("errgrind.cli.commands.multiline_input", return_value=" \t\n"),
+            patch("errgrind.cli.commands.console.print"),
+            patch("errgrind.cli.commands.errmsg") as error_message,
+        ):
+            _run_grilling(state, before)
+
+        error_message.assert_called_once_with(
+            "Grill 回答不能为空；如果不记得，可以直接输入“不记得”。"
+        )
+        self.assertEqual(self.db.get_error(error_id), before)
+        self.assertEqual(llm.calls, 1)
+
     def test_grilling_turn_limit_saves_pending_conversation(self):
         error_id = self.db.create_error("题目", "思路")
         state = AppState(

@@ -86,6 +86,31 @@ class ApplicationBoundaryTests(unittest.TestCase):
         self.assertEqual(tokens, ["忽略条件\n[GRILLING_END]"])
         self.assertEqual(self.db.get_error(error_id).status, "pending-teach")
 
+    def test_blank_grill_answers_leave_persisted_state_untouched(self):
+        error_id = self.db.create_error("求 x", "我直接套了公式")
+        messages = [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "开始吧"},
+            {"role": "assistant", "content": "当时为什么选这个公式？"},
+        ]
+        self.db.save_grilling_progress(
+            error_id,
+            json.dumps(messages, ensure_ascii=False),
+            json.dumps(empty_diagnostic_state(), ensure_ascii=False),
+        )
+        before = self.db.get_error(error_id)
+        llm = _LLM()
+        app = ErrGrindApplication(self.db, llm, self.prompts)
+        for answer in ("", "   ", "\t\n", "\u3000"):
+            with self.subTest(answer=repr(answer)):
+                with self.assertRaisesRegex(
+                    InvalidWorkflowState,
+                    "Grill 回答不能为空；如果不记得，可以直接输入“不记得”。",
+                ):
+                    app.submit_grill_answer(error_id, answer)
+                self.assertEqual(self.db.get_error(error_id), before)
+                self.assertEqual(llm.prompts, [])
+
     def test_teach_is_guarded_then_can_be_finished_and_resumed(self):
         error_id = self.db.create_error("题目", "思路")
         app = ErrGrindApplication(self.db, _LLM(), self.prompts)

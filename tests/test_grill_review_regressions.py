@@ -219,9 +219,9 @@ class GrillReviewRegressionTests(unittest.TestCase):
             self.assertNotIn("HIDDEN_TEACH_KEY", repr(result))
         self.assertEqual(self.db.get_error(error_id).grilling_diagnostic_state, private)
 
-    def test_formatted_prompt_example_is_json_and_first_turn_quotes_initial_thoughts(self):
+    def test_formatted_prompt_example_is_json_and_valid_turn_contract(self):
         prompt = self.prompts.load("grilling.md").format(
-            question="求 x", user_thoughts="...", reference_answer="x=2"
+            question="求 x", user_thoughts="我直接套了公式", reference_answer="x=2"
         )
         example = re.search(r"```text\n(\{.*?\})\n```", prompt, re.S)
         self.assertIsNotNone(example)
@@ -230,10 +230,12 @@ class GrillReviewRegressionTests(unittest.TestCase):
             raw,
             None,
             [{"role": "system", "content": prompt}, {"role": "user", "content": "开始吧"}],
-            initial_user_thoughts="...",
+            initial_user_thoughts="我直接套了公式",
         )
-        self.assertEqual(validated.new_evidence[0]["source_ref"], "initial_user_thoughts")
-        self.assertEqual(validated.new_evidence[0]["quote"], "...")
+        self.assertEqual(validated.new_evidence, [])
+        self.assertEqual(validated.next_action, "reasoning_question")
+        self.assertEqual([h["id"] for h in validated.new_hypotheses], ["H1", "H2"])
+        self.assertEqual(validated.probe["target_hypothesis_ids"], ["H1", "H2"])
 
     def test_nondiscriminating_reply_can_finish_undetermined(self):
         error_id = self.db.create_error("求 x", "我直接套了公式", "x=2")

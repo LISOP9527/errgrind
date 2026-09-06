@@ -157,6 +157,8 @@ def _run_grilling(state: AppState, error):
                 return
         state.application().pause_grill(error.id)
         sysmsg("已达到最大对话轮数，对话已保存")
+    except InvalidWorkflowState as exc:
+        errmsg(str(exc))
     except (WorkflowModelError, OutputContractError, WorkflowPersistenceError) as exc:
         errmsg(str(exc))
         _pause_grill_safely(state, error.id)
