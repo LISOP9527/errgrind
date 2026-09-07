@@ -1,283 +1,234 @@
+import base64
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from errgrind.cli import app
 from errgrind.config import DEFAULT_CODEX_MODEL, load
-from errgrind.llm.codex import CodexClient
+from errgrind.llm.codex import CodexClient, CodexError
+from errgrind.llm.codex_transport import CodexTransportError
 from errgrind.llm.ocr import OCR_OUTPUT_SCHEMA, TEXT_OUTPUT_SCHEMA, OcrError
 
 
-class FakeTextInput:
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeLocalImageInput:
-    def __init__(self, path):
-        self.path = path
-
-
-class FakeTurn:
-    def __init__(self, events, text="hello"):
-        self.events = events
-        self.text = text
-        self.interrupted = False
-
-    def stream(self):
-        yield from self.events
-
-    def interrupt(self):
-        self.interrupted = True
-
-    def run(self):
-        return SimpleNamespace(final_response=self.text)
-
-
-class FakeThread:
-    def __init__(self, text="hello", events=None):
-        self.text = text
-        self.events = events or []
-        self.run_calls = []
-
-    def run(self, prompt, **kwargs):
-        self.run_calls.append((prompt, kwargs))
-        return SimpleNamespace(final_response=self.text)
-
-    def turn(self, prompt, **kwargs):
-        self.run_calls.append((prompt, kwargs))
-        return FakeTurn(self.events, self.text)
-
-
-class FakeSDK:
-    def __init__(self, thread):
-        self.thread = thread
+class FakeTransport:
+    def __init__(self, responses=None):
+        self.responses = iter(responses or [["hello"]])
         self.calls = []
+        self.closed_streams = 0
+        self.closed = False
 
-    def thread_start(self, **kwargs):
-        self.calls.append(kwargs)
-        return self.thread
-
-    def account(self, **kwargs):
-        return {"logged_in": True}
-
-    def login_chatgpt(self):
-        return "browser-handle"
-
-    def login_chatgpt_device_code(self):
-        return "device-handle"
-
-    def models(self, **kwargs):
-        return ["gpt-5"]
+    def stream(self, body, token, account):
+        self.calls.append((body, token, account))
+        try:
+            for item in next(self.responses):
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            self.closed_streams += 1
 
     def close(self):
         self.closed = True
 
 
 class CodexProviderTests(unittest.TestCase):
-    SDK_TYPES = (
-        None,
-        None,
-        SimpleNamespace(deny_all="deny"),
-        SimpleNamespace(read_only="read"),
-        FakeTextInput,
-        FakeLocalImageInput,
-    )
+    def make(self, responses=None, **kwargs):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        auth_file = Path(temp.name) / "auth.json"
+        auth_file.write_text(json.dumps({"tokens": {
+            "access_token": "test-access", "account_id": "test-account",
+            "refresh_token": "refresh-never-forwarded",
+        }}))
+        transport = FakeTransport(responses)
+        client = CodexClient(transport=transport, auth_file=auth_file, **kwargs)
+        self.addCleanup(client.close)
+        return client, transport
 
-    def test_effort_reaches_chat_stream_and_json_turns(self):
+    def test_native_roles_and_only_caller_context_without_sdk(self):
+        client, transport = self.make()
+        messages = [
+            {"role": "system", "content": "诊断规则"},
+            {"role": "user", "content": "过去的回答"},
+            {"role": "assistant", "content": "之前的问题"},
+            {"role": "user", "content": "新证据"},
+        ]
+        with patch("errgrind.llm.codex._load_sdk") as sdk:
+            self.assertEqual(client.chat(messages), "hello")
+        sdk.assert_not_called()
+        body, token, account = transport.calls[0]
+        self.assertEqual(body["instructions"], "诊断规则")
+        self.assertEqual([m["role"] for m in body["input"]], ["user", "assistant", "user"])
+        self.assertEqual(body["input"][1]["content"], [{"type": "output_text", "text": "之前的问题"}])
+        self.assertEqual(set(body), {"model", "instructions", "input", "store", "stream"})
+        self.assertFalse(body["store"])
+        self.assertTrue(body["stream"])
+        self.assertNotIn("refresh-never-forwarded", json.dumps(transport.calls))
+        self.assertEqual((token, account), ("test-access", "test-account"))
+        self.assertIsNone(client._workspace)
+
+    def test_empty_system_does_not_fall_back_to_codex_prompt(self):
+        client, transport = self.make()
+        client.chat([{"role": "user", "content": "hello"}])
+        self.assertEqual(transport.calls[0][0]["instructions"], "")
+
+    def test_effort_reaches_chat_stream_and_json(self):
         for effort in (None, "high", "ultra", "future-effort"):
             with self.subTest(effort=effort):
-                sdk = FakeSDK(FakeThread(text='{"ok": true}'))
-                with CodexClient(sdk=sdk, reasoning_effort=effort) as client:
-                    with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-                        client.chat([])
-                        client.stream_chat([], lambda token: None)
-                        client.chat_json([])
-                self.assertEqual(len(sdk.thread.run_calls), 3)
-                for _, kwargs in sdk.thread.run_calls:
+                client, transport = self.make([["hello"], ["hello"], ['{"ok":true}']], reasoning_effort=effort)
+                client.chat([])
+                client.stream_chat([], lambda _: None)
+                client.chat_json([])
+                for body, _, _ in transport.calls:
                     if effort is None:
-                        self.assertNotIn("effort", kwargs)
+                        self.assertNotIn("reasoning", body)
                     else:
-                        self.assertEqual(kwargs["effort"], effort)
+                        self.assertEqual(body["reasoning"], {"effort": effort})
 
     def test_per_call_effort_overrides_configured_effort(self):
-        sdk = FakeSDK(FakeThread())
-        with CodexClient(sdk=sdk, reasoning_effort="high") as client:
-            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-                client.chat([], effort="low")
-                client.stream_chat([], lambda token: None, effort=None)
-        self.assertEqual(sdk.thread.run_calls[0][1]["effort"], "low")
-        self.assertIsNone(sdk.thread.run_calls[1][1]["effort"])
+        client, transport = self.make([["a"], ["b"]], reasoning_effort="high")
+        client.chat([], effort="low")
+        client.stream_chat([], lambda _: None, effort=None)
+        self.assertEqual(transport.calls[0][0]["reasoning"], {"effort": "low"})
+        self.assertNotIn("reasoning", transport.calls[1][0])
 
-    def test_chat_uses_read_only_and_denies_approvals(self):
-        sdk = FakeSDK(FakeThread())
-        client = CodexClient(sdk=sdk)
-        self.addCleanup(client.close)
-        with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-            self.assertEqual(client.chat([{"role": "user", "content": "hi"}]), "hello")
-        self.assertEqual(sdk.calls[0]["sandbox"], "read")
-        self.assertEqual(sdk.calls[0]["approval_mode"], "deny")
+    def test_untrusted_kwargs_cannot_enable_tools_or_server_history(self):
+        client, transport = self.make()
+        for extra in ({"tools": []}, {"previous_response_id": "secret"}, {"instructions": "override"}, {"store": True}):
+            with self.assertRaises(CodexError):
+                client.chat([], **extra)
+        self.assertEqual(transport.calls, [])
 
-    def test_stream_extracts_only_agent_deltas(self):
-        events = [SimpleNamespace(method="item/agentMessage/delta", payload=SimpleNamespace(delta="a")),
-                  SimpleNamespace(method="turn/completed", payload=SimpleNamespace(delta="ignored"))]
-        sdk = FakeSDK(FakeThread(events=events))
+    def test_json_repairs_invalid_response_with_native_messages_and_schema(self):
+        client, transport = self.make([["bad"], ['{"ok":true}']], max_retries=2)
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
+        self.assertEqual(client.chat_json([], output_schema=schema), {"ok": True})
+        self.assertEqual(transport.calls[0][0]["text"]["format"]["schema"], schema)
+        self.assertEqual(transport.calls[1][0]["input"][0]["role"], "assistant")
+        self.assertEqual(transport.calls[1][0]["input"][0]["content"][0]["text"], "bad")
+
+    def test_generic_json_does_not_send_wildcard_schema(self):
+        client, transport = self.make([['{"ok":true}']])
+        self.assertEqual(client.chat_json([]), {"ok": True})
+        self.assertNotIn("text", transport.calls[0][0])
+
+    def test_retry_only_transient_before_output(self):
+        transient = CodexTransportError("busy", retryable=True, status_code=429)
+        client, transport = self.make([[transient], ["ok"]])
+        with patch("errgrind.llm.codex.time.sleep"):
+            self.assertEqual(client.chat([]), "ok")
+        self.assertEqual(len(transport.calls), 2)
+        client, transport = self.make([[CodexTransportError("bad", retryable=False, status_code=400)]])
+        with self.assertRaises(CodexError):
+            client.chat([])
+        self.assertEqual(len(transport.calls), 1)
+
+    def test_stream_does_not_replay_after_output(self):
+        client, transport = self.make([["partial", CodexTransportError("broken", retryable=True)]])
         tokens = []
-        client = CodexClient(sdk=sdk)
-        self.addCleanup(client.close)
-        with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-            self.assertEqual(client.stream_chat([], tokens.append), "a")
-        self.assertEqual(tokens, ["a"])
+        with self.assertRaises(CodexError):
+            client.stream_chat([], tokens.append)
+        self.assertEqual(tokens, ["partial"])
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(transport.closed_streams, 1)
 
-    def test_json_retries_invalid_response(self):
-        class Thread(FakeThread):
-            def __init__(self): super().__init__(); self.responses = iter(["bad", '{"ok": true}'])
-            def turn(self, prompt, **kwargs):
-                self.run_calls.append((prompt, kwargs))
-                return FakeTurn([], next(self.responses))
-        sdk = FakeSDK(Thread())
-        client = CodexClient(sdk=sdk, max_retries=2)
-        self.addCleanup(client.close)
-        schema = {
-            "type": "object",
-            "properties": {"ok": {"type": "boolean"}},
-            "required": ["ok"],
-            "additionalProperties": False,
-        }
-        with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES), patch("errgrind.llm.codex.time.sleep"):
-            self.assertEqual(client.chat_json([], output_schema=schema), {"ok": True})
-        self.assertEqual(sdk.thread.run_calls[0][1]["output_schema"], schema)
+    def test_interrupt_and_callback_failure_close_stream_without_retry(self):
+        for error in (KeyboardInterrupt(), EOFError(), RuntimeError("callback")):
+            client, transport = self.make([["first", "second"]])
+            def callback(_):
+                raise error
+            with self.assertRaises(type(error)):
+                client.stream_chat([], callback)
+            self.assertEqual(transport.closed_streams, 1)
+            self.assertEqual(len(transport.calls), 1)
 
-    def test_generic_json_does_not_send_an_invalid_wildcard_schema(self):
-        sdk = FakeSDK(FakeThread(text='{"ok": true}'))
-        client = CodexClient(sdk=sdk)
-        self.addCleanup(client.close)
-        with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-            self.assertEqual(client.chat_json([]), {"ok": True})
+    def test_401_refreshes_once_using_sdk_and_rereads_file(self):
+        unauthorized = CodexTransportError("unauthorized", retryable=False, status_code=401)
+        client, transport = self.make([[unauthorized], ["ok"]])
+        sdk = Mock()
+        def refresh(**kwargs):
+            self.assertEqual(kwargs, {"refresh_token": True})
+            client._auth_file.write_text(json.dumps({"tokens": {"access_token": "renewed", "account_id": "account"}}))
+        sdk.account.side_effect = refresh
+        client._sdk = sdk
+        self.assertEqual(client.chat([]), "ok")
+        self.assertEqual(transport.calls[1][1], "renewed")
+        sdk.account.assert_called_once_with(refresh_token=True)
+        sdk.thread_start.assert_not_called()
+        client, transport = self.make([[unauthorized], [unauthorized]])
+        client._sdk = Mock()
+        with self.assertRaises(CodexError):
+            client.chat([])
+        self.assertEqual(len(transport.calls), 2)
+        client._sdk.account.assert_called_once()
 
-        self.assertNotIn("output_schema", sdk.thread.run_calls[0][1])
+    def test_expired_token_refreshes_before_request(self):
+        client, transport = self.make()
+        claim = base64.urlsafe_b64encode(json.dumps({"exp": time.time() - 10}).encode()).decode().rstrip("=")
+        client._auth_file.write_text(json.dumps({"tokens": {"access_token": "x." + claim + ".x", "account_id": "account"}}))
+        sdk = Mock()
+        sdk.account.side_effect = lambda **_: client._auth_file.write_text(json.dumps({"tokens": {"access_token": "fresh", "account_id": "account"}}))
+        client._sdk = sdk
+        client.chat([])
+        self.assertEqual(transport.calls[0][1], "fresh")
+        sdk.account.assert_called_once_with(refresh_token=True)
 
-    def test_keyboard_interrupt_requests_turn_interrupt(self):
-        class InterruptingTurn(FakeTurn):
-            def run(self):
-                raise KeyboardInterrupt
+    def test_missing_malformed_credentials_and_refresh_errors_are_safe(self):
+        for contents in ("secret-invalid-json", "[]", '{"tokens":null}', '{"tokens":[]}'):
+            client, transport = self.make()
+            client._auth_file.write_text(contents)
+            with self.assertRaises(CodexError) as error:
+                client.chat([])
+            self.assertNotIn("secret", str(error.exception))
+            self.assertFalse(transport.calls)
+        client, transport = self.make([[CodexTransportError("expired", retryable=False, status_code=401)]])
+        client._sdk = Mock()
+        client._sdk.account.side_effect = RuntimeError("refresh-token-secret")
+        with self.assertRaises(CodexError) as error:
+            client.chat([])
+        self.assertNotIn("secret", str(error.exception))
 
-        class Thread(FakeThread):
-            def turn(self, prompt, **kwargs):
-                self.run_calls.append((prompt, kwargs))
-                self.turn_handle = InterruptingTurn([])
-                return self.turn_handle
-
-        sdk = FakeSDK(Thread())
-        client = CodexClient(sdk=sdk)
-        self.addCleanup(client.close)
-        with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-            with self.assertRaises(KeyboardInterrupt):
-                client.chat([{"role": "user", "content": "hi"}])
-        self.assertTrue(sdk.thread.turn_handle.interrupted)
-
-    def test_ocr_uses_local_image_and_structured_output(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "problem.png"
+    def test_ocr_and_transcribe_send_image_bytes_not_paths(self):
+        for result, schema, method in [
+            ({"question": "求x", "user_thoughts": "移项", "reference_answer": "2"}, OCR_OUTPUT_SCHEMA, "ocr_image"),
+            ({"text": "先通分"}, TEXT_OUTPUT_SCHEMA, "transcribe_image"),
+        ]:
+            client, transport = self.make([[json.dumps(result)]], reasoning_effort="high")
+            image_path = client._auth_file.parent / "problem.png"
             image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
-            thread = FakeThread(
-                text=json.dumps(
-                    {
-                        "question": "求 $x$",
-                        "user_thoughts": "移项",
-                        "reference_answer": "$x=2$",
-                    },
-                    ensure_ascii=False,
-                )
-            )
-            sdk = FakeSDK(thread)
-            client = CodexClient(sdk=sdk, reasoning_effort="high")
-            self.addCleanup(client.close)
+            parsed = getattr(client, method)(str(image_path), "OCR prompt")
+            self.assertEqual(parsed, result if method == "ocr_image" else result["text"])
+            body = transport.calls[0][0]
+            self.assertEqual(body["instructions"], "OCR prompt")
+            self.assertTrue(body["input"][0]["content"][1]["image_url"].startswith("data:image/png;base64,"))
+            self.assertNotIn(str(image_path), json.dumps(body))
+            self.assertEqual(body["text"]["format"]["schema"], schema)
+            self.assertEqual(body["reasoning"], {"effort": "high"})
 
-            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-                result = client.ocr_image(str(image_path), "OCR prompt")
+    def test_transcribe_empty_result_is_validation_error_without_retry(self):
+        client, transport = self.make([['{"text":"  "}']])
+        image_path = client._auth_file.parent / "problem.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+        with self.assertRaises(OcrError):
+            client.transcribe_image(str(image_path), "OCR")
+        self.assertEqual(len(transport.calls), 1)
 
-        self.assertEqual(result["question"], "求 $x$")
-        turn_input, turn_kwargs = thread.run_calls[0]
-        self.assertIsInstance(turn_input[0], FakeTextInput)
-        self.assertIsInstance(turn_input[1], FakeLocalImageInput)
-        self.assertEqual(turn_input[1].path, str(image_path.resolve()))
-        self.assertEqual(turn_kwargs["output_schema"], OCR_OUTPUT_SCHEMA)
-        self.assertEqual(turn_kwargs["effort"], "high")
-        self.assertEqual(sdk.calls[0]["sandbox"], "read")
-        self.assertEqual(sdk.calls[0]["approval_mode"], "deny")
-
-    def test_transcribe_uses_local_image_text_schema_and_effort(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "thought.png"
-            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
-            thread = FakeThread(text=json.dumps({"text": "先通分"}, ensure_ascii=False))
-            sdk = FakeSDK(thread)
-            client = CodexClient(sdk=sdk, reasoning_effort="high")
-            self.addCleanup(client.close)
-
-            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-                result = client.transcribe_image(str(image_path), "只转录思路")
-
-        self.assertEqual(result, "先通分")
-        turn_input, turn_kwargs = thread.run_calls[0]
-        self.assertIsInstance(turn_input[0], FakeTextInput)
-        self.assertIsInstance(turn_input[1], FakeLocalImageInput)
-        self.assertEqual(turn_input[1].path, str(image_path.resolve()))
-        self.assertEqual(turn_kwargs["output_schema"], TEXT_OUTPUT_SCHEMA)
-        self.assertEqual(turn_kwargs["effort"], "high")
-
-    def test_transcribe_empty_response_is_validation_error_without_retry(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "thought.png"
-            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
-            thread = FakeThread(text='{"text":"  "}')
-            sdk = FakeSDK(thread)
-            client = CodexClient(sdk=sdk, max_retries=3)
-            self.addCleanup(client.close)
-
-            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-                with self.assertRaisesRegex(OcrError, "没有识别出当前字段"):
-                    client.transcribe_image(str(image_path), "只转录思路")
-
-        self.assertEqual(len(thread.run_calls), 1)
-
-    def test_transcribe_eof_interrupts_active_turn(self):
-        class EofTurn(FakeTurn):
-            def run(self):
-                raise EOFError
-
-        class Thread(FakeThread):
-            def turn(self, prompt, **kwargs):
-                self.run_calls.append((prompt, kwargs))
-                self.turn_handle = EofTurn([])
-                return self.turn_handle
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "thought.png"
-            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
-            thread = Thread()
-            sdk = FakeSDK(thread)
-            client = CodexClient(sdk=sdk)
-            self.addCleanup(client.close)
-
-            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
-                with self.assertRaises(EOFError):
-                    client.transcribe_image(str(image_path), "只转录思路")
-
-        self.assertTrue(thread.turn_handle.interrupted)
-
-    def test_auth_helpers_delegate_to_sdk(self):
-        sdk = FakeSDK(FakeThread())
-        client = CodexClient(sdk=sdk)
-        self.assertEqual(client.account(), {"logged_in": True})
-        self.assertEqual(client.login_chatgpt_device_code(), "device-handle")
+    def test_auth_helpers_and_models_still_delegate_without_generation(self):
+        sdk = Mock()
+        client, transport = self.make(sdk=sdk)
+        self.assertEqual(client.account(), sdk.account.return_value)
+        self.assertEqual(client.login_chatgpt(), sdk.login_chatgpt.return_value)
+        self.assertEqual(client.login_chatgpt_device_code(), sdk.login_chatgpt_device_code.return_value)
+        self.assertEqual(client.models(), sdk.models.return_value)
+        self.assertEqual(transport.calls, [])
         client.close()
         client.close()
-        self.assertTrue(sdk.closed)
+        sdk.close.assert_called_once()
+        self.assertTrue(transport.closed)
 
     def test_app_wiring_does_not_require_api_key(self):
         class FakeClient:

@@ -18,7 +18,8 @@
 - [Grill 与 Teach 会话生命周期](decisions/2026-07-27-conversation-lifecycle.md)：完成的 Grill 只读，Teach 持续追加。
 - [终端内容渲染边界](decisions/2026-07-27-terminal-content-rendering.md)：标准 Markdown + LaTeX 保持在数据层，终端统一在 UI 边界降级渲染。
 - [Drill 两阶段规格隔离](decisions/2026-07-28-drill-spec-isolation.md)：采用 Spec -> Draft 两阶段出题，保留原题信息边界和可人工调优的 Prompt。
-- [Codex provider 通过官方 app-server 接入](decisions/2026-08-29-codex-app-server-provider.md)：使用官方 SDK 管理登录，动态发现模型与 effort，支持手动模型 ID 和推理强度配置。
+- [Codex OAuth 生成直连 Responses](decisions/2026-09-07-codex-direct-responses.md)：独立构造 Prompt 与原生消息，官方 SDK 保留登录、刷新和模型目录。
+- [原 Codex app-server 接入决策](decisions/2026-08-29-codex-app-server-provider.md)：历史方案；生成和凭据读取边界已由直连决策替代。
 - [OCR 作为需人工校对的录题入口](decisions/2026-08-31-ocr-as-reviewed-input.md)：provider 负责图片转录，用户确认后的文本才进入现有 Error 工作流。
 - [在录题字段内整合图片识别](decisions/2026-09-06-record-field-image-input.md)：将选图和 OCR 整合进 `/record` 各字段，支持题目、思路与答案分离截图。
 - [Evidence 来源与 Drill Action Ledger](decisions/2026-09-01-evidence-provenance-drill-ledger.md)：记录 Error 来源、Drill 判分与衍生 Error 的可追溯关系。

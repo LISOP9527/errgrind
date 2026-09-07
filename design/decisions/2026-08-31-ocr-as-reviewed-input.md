@@ -16,8 +16,9 @@ Grill 的 episode-level diagnosis，以及 Teach 和 Drill 使用的机制判断
  统一写在 `prompts/ocr.md`。
 - 三个字段必须在写入前依次展示给用户编辑。题目和用户思路沿用 `/record` 的必填规则，参考答案可空；
   任一步取消都不创建数据库记录。
-- 图片能力留在 provider 适配器边界：Codex 使用官方 `LocalImageInput`，Gemini 使用
-  `inline_data`，OpenAI 兼容 provider 使用标准 `image_url` 消息。
+- 图片能力留在 provider 适配器边界：Codex 使用 Responses 的 `input_image` data URL
+  （由 [2026-09-07 直连决策](2026-09-07-codex-direct-responses.md) 替代原 `LocalImageInput`），
+  Gemini 使用 `inline_data`，OpenAI 兼容 provider 使用标准 `image_url` 消息。
 - MVP 只保存用户确认后的文本，不复制或持久化原图，现有数据库 schema 和后续工作流保持不变。
 
 ## Rationale

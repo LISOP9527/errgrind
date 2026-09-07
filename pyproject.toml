@@ -15,7 +15,7 @@ dependencies = [
 # unsupported runtime wheel does not prevent Gemini/DeepSeek/OpenCode users
 # from installing ErrGrind at all.  install.sh enables this extra whenever the
 # matching runtime is available.
-codex = ["openai-codex==0.147.0"]
+codex = ["openai-codex==0.147.0", "httpx[socks]>=0.27.0"]
 
 [project.scripts]
 errgrind = "errgrind.main:main"

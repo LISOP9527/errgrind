@@ -1,26 +1,26 @@
-"""ErrGrind adapter for the official ``openai-codex`` Python SDK.
+"""Codex OAuth generation over HTTP; the SDK only manages login and models.
 
-The SDK owns authentication and starts the local Codex app-server.  This
-module deliberately does not inspect Codex's credential files or implement
-OAuth itself.
+Requests contain ErrGrind instructions and native conversation messages. No
+Codex thread is created, so its agent prompt, AGENTS and tools cannot enter the
+model request. The official runtime remains the sole writer of OAuth tokens.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import tempfile
 import time
 from collections.abc import Callable
+from contextlib import closing
+from pathlib import Path
 from typing import Any
 
+from .codex_transport import CodexResponsesTransport, CodexTransportError
 from .ocr import (
-    OCR_OUTPUT_SCHEMA,
-    TEXT_OUTPUT_SCHEMA,
-    OcrError,
-    load_image,
-    parse_ocr_result,
-    parse_text_result,
+    OCR_OUTPUT_SCHEMA, TEXT_OUTPUT_SCHEMA, load_image,
+    parse_ocr_result, parse_text_result,
 )
 
 
@@ -28,105 +28,67 @@ class CodexError(Exception):
     """User-facing error raised by the Codex provider."""
 
 
-def _load_sdk() -> tuple[Any, Any, Any, Any, Any, Any]:
+def _load_sdk() -> tuple[Any, Any]:
     try:
-        from openai_codex import (
-            ApprovalMode,
-            Codex,
-            CodexConfig,
-            LocalImageInput,
-            Sandbox,
-            TextInput,
-        )
-    except ImportError as exc:  # pragma: no cover - depends on installation
+        from openai_codex import Codex, CodexConfig
+    except ImportError as exc:
         raise CodexError(
-            "Codex provider 需要官方 openai-codex SDK 和匹配的 runtime；"
+            "Codex 登录和模型目录需要官方 openai-codex SDK；"
             "请在项目目录重新运行 bash install.sh。"
         ) from exc
-    return Codex, CodexConfig, ApprovalMode, Sandbox, TextInput, LocalImageInput
-
-
-def _text_from_event(event: Any) -> str:
-    """Extract only assistant text deltas from a public SDK notification."""
-    # Current SDK exposes AgentMessageDeltaNotification.delta.  Attribute
-    # access keeps this compatible with pydantic model instances and mocks.
-    payload = getattr(event, "payload", event)
-    method = getattr(event, "method", "")
-    if str(method) != "item/agentMessage/delta":
-        return ""
-    delta = getattr(payload, "delta", "")
-    return delta if isinstance(delta, str) else ""
-
-
-def _result_text(result: Any) -> str:
-    text = getattr(result, "final_response", None)
-    if isinstance(text, str):
-        return text
-    if isinstance(result, dict) and isinstance(result.get("final_response"), str):
-        return result["final_response"]
-    raise CodexError("Codex 响应中没有文本")
+    return Codex, CodexConfig
 
 
 class CodexClient:
-    """Synchronous, read-only Codex provider matching ErrGrind's clients."""
+    """Stateless model calls with SDK-owned OAuth login and refresh."""
 
     def __init__(
-        self,
-        model: str = "gpt-5.6-sol",
-        max_retries: int = 3,
-        sdk: Any | None = None,
-        codex_bin: str | None = None,
+        self, model: str = "gpt-5.6-sol", max_retries: int = 3,
+        sdk: Any | None = None, codex_bin: str | None = None,
         reasoning_effort: str | None = None,
+        *, transport: Any | None = None, auth_file: str | Path | None = None,
     ) -> None:
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.max_retries = max(1, max_retries)
-        self._workspace = tempfile.TemporaryDirectory(prefix="errgrind-codex-")
-        self._closed = False
-        if sdk is None:
-            try:
-                (
-                    Codex,
-                    CodexConfig,
-                    _ApprovalMode,
-                    _Sandbox,
-                    _TextInput,
-                    _LocalImageInput,
-                ) = _load_sdk()
-                # Let the official SDK resolve its matching bundled runtime;
-                # accepting an explicit binary is useful for controlled test
-                # or deployment environments without silently mixing CLI
-                # protocol versions.
-                config_kwargs: dict[str, Any] = {"cwd": os.fspath(self._workspace.name)}
-                if codex_bin:
-                    config_kwargs["codex_bin"] = codex_bin
-                config = CodexConfig(**config_kwargs)
-                sdk = Codex(config=config)
-            except KeyboardInterrupt:
-                self._workspace.cleanup()
-                raise
-            except CodexError:
-                self._workspace.cleanup()
-                raise
-            except Exception as exc:
-                self._workspace.cleanup()
-                raise CodexError(f"Codex app-server 启动失败: {exc}") from exc
         self._sdk = sdk
+        self._codex_bin = codex_bin
+        self._transport = transport
+        self._workspace = None
+        self._closed = False
+        codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+        self._auth_file = Path(auth_file) if auth_file is not None else codex_home / "auth.json"
+
+    def _control(self) -> Any:
+        if self._closed:
+            raise CodexError("Codex 客户端已关闭")
+        if self._sdk is None:
+            Codex, CodexConfig = _load_sdk()
+            self._workspace = tempfile.TemporaryDirectory(prefix="errgrind-codex-")
+            kwargs: dict[str, Any] = {"cwd": self._workspace.name}
+            if self._codex_bin:
+                kwargs["codex_bin"] = self._codex_bin
+            try:
+                self._sdk = Codex(config=CodexConfig(**kwargs))
+            except BaseException as exc:
+                self._workspace.cleanup()
+                self._workspace = None
+                if isinstance(exc, Exception):
+                    raise CodexError("Codex 登录服务启动失败，请检查官方 SDK 安装") from None
+                raise
+        return self._sdk
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        try:
-            close = getattr(self._sdk, "close", None)
-            if callable(close):
+        for resource in (self._transport, self._sdk):
+            if resource is not None:
                 try:
-                    close()
+                    resource.close()
                 except Exception:
-                    # Shutdown must not turn a user Ctrl+C or a completed
-                    # session into a second, unrelated error.
                     pass
-        finally:
+        if self._workspace is not None:
             self._workspace.cleanup()
 
     def __enter__(self) -> "CodexClient":
@@ -135,169 +97,138 @@ class CodexClient:
     def __exit__(self, *_args: Any) -> None:
         self.close()
 
-    @staticmethod
-    def _prompt(messages: list[dict]) -> tuple[str, str]:
-        system: list[str] = []
-        turns: list[dict[str, str]] = []
-        for message in messages:
-            role = str(message.get("role", "user"))
-            content = message.get("content", "")
-            if not isinstance(content, str):
-                content = str(content)
-            if role == "system":
-                system.append(content)
-            else:
-                turns.append({"role": role, "content": content})
-        prompt = (
-            "下面 JSON 是此前对话记录。严格保持其中的 user/assistant 角色，"
-            "只生成对最后一条 user 消息的下一条 assistant 回复。\n"
-            + json.dumps(turns, ensure_ascii=False)
-        )
-        return "\n\n".join(system), prompt
-
-    def _new_thread(self, messages: list[dict]) -> Any:
-        _Codex, _Config, ApprovalMode, Sandbox, _TextInput, _LocalImageInput = _load_sdk()
-        instructions, prompt = self._prompt(messages)
-        kwargs: dict[str, Any] = {
-            "base_instructions": instructions or None,
-            "developer_instructions": (
-                "你是 ErrGrind 的纯文本推理模型。只回答输入中的最后一个用户请求。"
-                "绝对不要调用任何工具、执行命令、访问网络、读取或修改文件。"
-            ),
-            "cwd": os.fspath(self._workspace.name),
-            "ephemeral": True,
-            "model": self.model,
-            "sandbox": Sandbox.read_only,
-            "approval_mode": ApprovalMode.deny_all,
-        }
-        return self._sdk.thread_start(**kwargs), prompt
-
-    def _image_json(
-        self, image_path: str, prompt: str, output_schema: dict, parser: Callable[[Any], Any]
-    ) -> Any:
-        """Submit one local image through the official image input API."""
-        payload = load_image(image_path)
-        (
-            _Codex,
-            _Config,
-            ApprovalMode,
-            Sandbox,
-            TextInput,
-            LocalImageInput,
-        ) = _load_sdk()
-        last: Exception | None = None
-        for attempt in range(self.max_retries):
-            turn = None
+    def _credentials(self, *, refresh: bool = False) -> tuple[str, str]:
+        if refresh:
             try:
-                thread = self._sdk.thread_start(
-                    base_instructions=prompt,
-                    developer_instructions=(
-                        "你只执行图片转录。不要调用工具、执行命令、访问网络或修改文件。"
-                        "不得根据常识补全图片中不可见的内容。"
-                    ),
-                    cwd=os.fspath(self._workspace.name),
-                    ephemeral=True,
-                    model=self.model,
-                    sandbox=Sandbox.read_only,
-                    approval_mode=ApprovalMode.deny_all,
-                )
-                turn = thread.turn(
-                    [
-                        TextInput("请按照系统规则转录这张数学错题图片。"),
-                        LocalImageInput(payload.path),
-                    ],
-                    model=self.model,
-                    output_schema=output_schema,
-                    **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
-                )
-                result = turn.run()
-                return parser(_result_text(result))
-            except (KeyboardInterrupt, EOFError):
-                if turn is not None:
-                    try:
-                        turn.interrupt()
-                    except Exception:
-                        pass
-                raise
-            except OcrError:
-                raise
-            except Exception as exc:
-                last = exc
-            if attempt + 1 < self.max_retries:
-                time.sleep(2**attempt)
-        raise CodexError(f"Codex OCR 调用失败: {last}") from last
+                self.account(refresh_token=True)
+            except Exception:
+                raise CodexError("ChatGPT 登录刷新失败，请重新登录后重试") from None
+        try:
+            data = json.loads(self._auth_file.read_text(encoding="utf-8"))
+            tokens = data.get("tokens") or {}
+            access_token = tokens.get("access_token")
+            account_id = tokens.get("account_id")
+            if not isinstance(access_token, str) or not access_token:
+                raise ValueError
+            if not isinstance(account_id, str) or not account_id:
+                raise ValueError
+        except (OSError, ValueError, TypeError, AttributeError):
+            # Do not include JSON parser errors: credential file contents may
+            # contain secrets. Keyring-only credentials are not exported here.
+            raise CodexError(
+                "无法读取 Codex 的文件登录凭据。直连需要官方登录生成的 auth.json；"
+                "仅使用系统钥匙串的登录暂不支持。"
+            ) from None
+        # JWT expiry is only a refresh hint, never used to verify identity.
+        try:
+            part = access_token.split(".")[1]
+            claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+            expires = float(claims["exp"])
+        except (IndexError, ValueError, TypeError, KeyError, AttributeError):
+            expires = None
+        if not refresh and expires is not None and expires <= time.time() + 60:
+            return self._credentials(refresh=True)
+        return access_token, account_id
+
+    def _body(self, messages: list[dict], **kwargs: Any) -> dict:
+        instructions: list[str] = []
+        inputs: list[dict] = []
+        for message in messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+            if role == "system":
+                if not isinstance(content, str):
+                    raise CodexError("系统指令必须是文本")
+                instructions.append(content)
+                continue
+            if role not in ("user", "assistant", "developer"):
+                raise CodexError("Codex 直连只接受 system、developer、user 和 assistant 消息")
+            if isinstance(content, str):
+                content = [{"type": "output_text" if role == "assistant" else "input_text", "text": content}]
+            elif not isinstance(content, list):
+                raise CodexError("对话内容必须是文本或图片消息")
+            inputs.append({"role": role, "content": content})
+        body: dict[str, Any] = {
+            "model": kwargs.pop("model", self.model),
+            "instructions": "\n\n".join(instructions),
+            "input": inputs, "store": False, "stream": True,
+        }
+        effort = kwargs.pop("effort", self.reasoning_effort)
+        if effort is not None:
+            body["reasoning"] = {"effort": effort}
+        schema = kwargs.pop("output_schema", None)
+        if schema is not None:
+            body["text"] = {"format": {
+                "type": "json_schema", "name": "errgrind_response",
+                "strict": True, "schema": schema,
+            }}
+        if kwargs:
+            # Never pass arbitrary kwargs through to instructions, tools,
+            # persistence, previous_response_id or other transport fields.
+            raise CodexError("Codex 直连收到不支持的生成参数")
+        return body
+
+    def _generate(self, messages: list[dict], on_token: Callable[[str], None] | None = None, **kwargs: Any) -> str:
+        if self._closed:
+            raise CodexError("Codex 客户端已关闭")
+        body = self._body(messages, **kwargs)
+        if self._transport is None:
+            try:
+                self._transport = CodexResponsesTransport()
+            except Exception:
+                raise CodexError("无法创建 Codex HTTP 客户端，请检查代理配置和依赖") from None
+        credentials = self._credentials()
+        refreshed = False
+        attempt = 0
+        while True:
+            collected: list[str] = []
+            try:
+                with closing(self._transport.stream(body, *credentials)) as stream:
+                    for token in stream:
+                        collected.append(token)
+                        if on_token is not None:
+                            on_token(token)
+                return "".join(collected)
+            except CodexTransportError as exc:
+                # Once generated text exists, replay could change the answer
+                # or repeat visible output, even if no callback was supplied.
+                if collected:
+                    raise CodexError("Codex 响应中断，已有内容不会自动重放") from None
+                if exc.status_code == 401 and not refreshed:
+                    credentials = self._credentials(refresh=True)
+                    refreshed = True
+                    continue
+                attempt += 1
+                if not exc.retryable or attempt >= self.max_retries:
+                    raise CodexError(str(exc)) from None
+                time.sleep(2 ** (attempt - 1))
+
+    def chat(self, messages: list[dict], **kwargs: Any) -> str:
+        return self._generate(messages, **kwargs)
+
+    def stream_chat(self, messages: list[dict], on_token: Callable[[str], None], **kwargs: Any) -> str:
+        return self._generate(messages, on_token, **kwargs)
+
+    def _image_json(self, image_path: str, prompt: str, output_schema: dict, parser: Callable[[Any], Any]) -> Any:
+        payload = load_image(image_path)
+        text = self.chat([
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": [
+                {"type": "input_text", "text": "请按照系统规则转录这张数学错题图片。"},
+                {"type": "input_image", "image_url": payload.data_url},
+            ]},
+        ], output_schema=output_schema)
+        return parser(text)
 
     def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
-        """Transcribe one local image through the official image input API."""
         return self._image_json(image_path, prompt, OCR_OUTPUT_SCHEMA, parse_ocr_result)
 
     def transcribe_image(self, image_path: str, prompt: str) -> str:
-        """Transcribe one requested image field, including thought-only images."""
         return self._image_json(image_path, prompt, TEXT_OUTPUT_SCHEMA, parse_text_result)
 
-    def chat(self, messages: list[dict], **kwargs: Any) -> str:
-        last: Exception | None = None
-        for attempt in range(self.max_retries):
-            turn = None
-            try:
-                thread, prompt = self._new_thread(messages)
-                turn_kwargs = dict(kwargs)
-                turn_kwargs.setdefault("model", self.model)
-                if self.reasoning_effort:
-                    turn_kwargs.setdefault("effort", self.reasoning_effort)
-                turn = thread.turn(prompt, **turn_kwargs)
-                result = turn.run()
-                return _result_text(result)
-            except KeyboardInterrupt:
-                if turn is not None:
-                    try:
-                        turn.interrupt()
-                    except Exception:
-                        pass
-                raise
-            except Exception as exc:
-                last = exc
-                if attempt + 1 < self.max_retries:
-                    time.sleep(2**attempt)
-        raise CodexError(f"Codex 调用失败: {last}") from last
-
-    def stream_chat(self, messages: list[dict], on_token: Callable[[str], None], **kwargs: Any) -> str:
-        last: Exception | None = None
-        for attempt in range(self.max_retries):
-            collected: list[str] = []
-            turn = None
-            try:
-                thread, prompt = self._new_thread(messages)
-                turn_kwargs = dict(kwargs)
-                turn_kwargs.setdefault("model", self.model)
-                if self.reasoning_effort:
-                    turn_kwargs.setdefault("effort", self.reasoning_effort)
-                turn = thread.turn(prompt, **turn_kwargs)
-                for event in turn.stream():
-                    token = _text_from_event(event)
-                    if token:
-                        collected.append(token)
-                        on_token(token)
-                return "".join(collected)
-            except KeyboardInterrupt as exc:
-                if turn is not None:
-                    try:
-                        turn.interrupt()
-                    except Exception:
-                        pass
-                raise KeyboardInterrupt from exc
-            except Exception as exc:
-                if collected:
-                    raise CodexError(f"Codex 流式调用中断: {exc}") from exc
-                last = exc
-                if attempt + 1 < self.max_retries:
-                    time.sleep(2**attempt)
-        raise CodexError(f"Codex 调用失败: {last}") from last
-
     def chat_json(self, messages: list[dict], **kwargs: Any) -> dict:
-        # Codex structured output requires a fully strict schema.  Callers
-        # with a known contract pass one; generic JSON calls rely on the
-        # prompt plus the local parse/retry guard below.
+        # Known contracts use Responses text.format; generic JSON retains
+        # local parse/repair without inventing a wildcard strict schema.
         output_schema = kwargs.pop("output_schema", None)
         json_attempts = max(
             1, int(kwargs.pop("max_json_attempts", self.max_retries))
@@ -306,7 +237,6 @@ class CodexClient:
             kwargs["output_schema"] = output_schema
         retry_messages = list(messages)
         last_text = ""
-        last_error: Exception | None = None
         for attempt in range(json_attempts):
             last_text = self.chat(retry_messages, **kwargs)
             try:
@@ -314,25 +244,24 @@ class CodexClient:
                 if not isinstance(result, dict):
                     raise ValueError("顶层必须是 JSON 对象")
                 return result
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                last_error = exc
+            except (json.JSONDecodeError, TypeError, ValueError):
                 if attempt + 1 < json_attempts:
                     retry_messages = [
                         *messages,
                         {"role": "assistant", "content": last_text},
                         {"role": "user", "content": "只输出完整合法 JSON 对象。"},
                     ]
-        raise CodexError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")
+        # Application recognizes this prefix as a repairable contract error.
+        raise CodexError("JSON 解析失败：Codex 返回的内容不是合法 JSON 对象") from None
 
     def account(self, *, refresh_token: bool = False) -> Any:
-        """Return SDK-owned account status without touching credential files."""
-        return self._sdk.account(refresh_token=refresh_token)
+        return self._control().account(refresh_token=refresh_token)
 
     def login_chatgpt(self) -> Any:
-        return self._sdk.login_chatgpt()
+        return self._control().login_chatgpt()
 
     def login_chatgpt_device_code(self) -> Any:
-        return self._sdk.login_chatgpt_device_code()
+        return self._control().login_chatgpt_device_code()
 
     def models(self, *, include_hidden: bool = False) -> Any:
-        return self._sdk.models(include_hidden=include_hidden)
+        return self._control().models(include_hidden=include_hidden)

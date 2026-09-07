@@ -1,5 +1,7 @@
 # Codex provider 通过官方 app-server 接入
 
+> 2026-09-07：生成与凭据读取边界已由 [Codex OAuth 生成直连 Responses](2026-09-07-codex-direct-responses.md) 替代。以下保留原决策背景。
+
 ## Context
 
 ErrGrind 需要允许用户使用自己的 ChatGPT Codex 订阅，同时保持现有

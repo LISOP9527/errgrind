@@ -1,5 +1,13 @@
 # 当前进度与验证记录
 
+## 2026-09-07：Codex OAuth 生成直连 Responses
+
+- 参考 Pi 的请求协议，普通、流式、JSON、图片转录直接请求 Codex Responses；不创建 Codex thread，不附加 agent Prompt、AGENTS、技能、工具或环境上下文。历史保留原生角色，SQLite 仍是唯一会话事实来源。
+- 官方 SDK 保留登录、刷新与模型目录；生成只读现有文件登录中的 access token/account id，不另存凭据。401 最多刷新一次，只有无输出的瞬态失败重试，输出后中断不重放。钥匙串独占登录暂不支持直连。
+- 严格 Schema 使用 `text.format`，图片使用 data URL；Codex 可选依赖补充 HTTPX SOCKS 支持，本机已安装，未修改代理设置。
+- 验证：完整离线回归 **181 项通过**。真实 Sol 直连通过多轮历史（`24`）、严格 JSON（`DIRECT_OK`）、流式（`STREAM_OK`）与合成图片 OCR（`x+1=2`）；集成探针禁止 SDK 启动，确认生成不经过 app-server。未发送业务数据库中的错题。
+- 设计与当前兼容边界见 [直连决策](design/decisions/2026-09-07-codex-direct-responses.md)。
+
 ## 2026-09-06：录题字段内图片输入
 
 - `/record` 的题目、思路和参考答案窗口分别支持添加图片；识别文字追加到草稿，可继续编辑并重复添加图片，最终保存为一条 `pending-grill` Error。
