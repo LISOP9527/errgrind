@@ -1,7 +1,7 @@
 from io import StringIO
 import re
 from prompt_toolkit import Application, PromptSession
-from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.completion import Completer, Completion, CompleteEvent
 from prompt_toolkit.formatted_text import HTML, ANSI, to_formatted_text
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -187,7 +187,28 @@ def _newline(event):
 
 
 _psession = PromptSession(multiline=True, key_bindings=_kb, history=InMemoryHistory())
-_sline = PromptSession(history=InMemoryHistory())
+_sline_kb = KeyBindings()
+
+
+@_sline_kb.add("enter")
+def _accept_command(event):
+    buffer = event.current_buffer
+    state = buffer.complete_state
+    if state is not None and state.current_completion is not None:
+        # 方向键选中的候选已写入 buffer，直接提交即可。
+        pass
+    elif buffer.completer is not None:
+        # 同步取第一项，快速输入后立即回车也能完成补全。
+        completion = next(
+            iter(buffer.completer.get_completions(buffer.document, CompleteEvent())),
+            None,
+        )
+        if completion is not None:
+            buffer.apply_completion(completion)
+    buffer.validate_and_handle()
+
+
+_sline = PromptSession(history=InMemoryHistory(), key_bindings=_sline_kb)
 
 _hint_shown = False
 _completer = None
@@ -199,9 +220,10 @@ class SlashCompleter(Completer):
 
     def get_completions(self, document, complete_event):
         text = document.text
-        if not text.startswith("/"):
+        if (not text.startswith("/") or any(char.isspace() for char in text)
+                or document.cursor_position != len(text)):
             return
-        partial = text[1:].split()[0] if len(text) > 1 else ""
+        partial = text[1:]
         for name, desc in self.commands.items():
             if name.startswith(partial):
                 yield Completion(
