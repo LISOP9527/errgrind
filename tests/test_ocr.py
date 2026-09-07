@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from errgrind.llm.client import LLMClient
 from errgrind.llm.gemini import GeminiClient
-from errgrind.llm.ocr import OcrError, load_image, parse_ocr_result
+from errgrind.llm.ocr import OcrError, load_image, parse_ocr_result, parse_text_result
 
 
 class ImageValidationTests(unittest.TestCase):
@@ -56,6 +56,14 @@ class ImageValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(OcrError, "必须是文本"):
             parse_ocr_result({"question": "题目", "user_thoughts": [], "reference_answer": ""})
 
+    def test_text_contract_supports_thought_only_and_rejects_empty(self):
+        self.assertEqual(parse_text_result({"text": "只写了思路"}), "只写了思路")
+        self.assertEqual(parse_text_result('```json\n{"text":"参考答案"}\n```'), "参考答案")
+        with self.assertRaisesRegex(OcrError, "没有识别出当前字段"):
+            parse_text_result({"text": "  "})
+        with self.assertRaisesRegex(OcrError, "必须是文本"):
+            parse_text_result({"text": None})
+
 
 class ProviderOcrTests(unittest.TestCase):
     def setUp(self):
@@ -103,3 +111,25 @@ class ProviderOcrTests(unittest.TestCase):
         self.assertEqual(messages[0], {"role": "system", "content": "OCR prompt"})
         image_url = messages[1]["content"][1]["image_url"]["url"]
         self.assertTrue(image_url.startswith("data:image/png;base64,"))
+
+    def test_openai_compatible_transcribes_thought_only_image(self):
+        client = LLMClient(api_key="test-key")
+        with patch.object(client, "chat_json", return_value={"text": "我的思路是先约分"}) as chat_json:
+            actual = client.transcribe_image(str(self.image_path), "只转录图片中的解题思路")
+
+        self.assertEqual(actual, "我的思路是先约分")
+        self.assertEqual(chat_json.call_args.kwargs["output_schema"]["required"], ["text"])
+
+    def test_gemini_transcribes_thought_only_image(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"text":"只看到草稿思路"}'}]}}]
+        }
+        client = GeminiClient(api_key="test-key", model="test-model", max_retries=1)
+
+        with patch("errgrind.llm.gemini.httpx.post", return_value=response) as post:
+            actual = client.transcribe_image(str(self.image_path), "只转录用户思路")
+
+        self.assertEqual(actual, "只看到草稿思路")
+        self.assertEqual(post.call_args.kwargs["json"]["generationConfig"]["response_schema"]["required"], ["text"])

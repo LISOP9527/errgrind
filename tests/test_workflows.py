@@ -918,6 +918,138 @@ class RecordWorkflowTests(unittest.TestCase):
 
         self.assertEqual(self.db.list_all_errors(), [])
 
+    def test_record_image_callbacks_route_fields_and_save_edited_values_once(self):
+        calls = []
+        paths = iter(["/tmp/q.png", "/tmp/thoughts.png", "/tmp/answer.png"])
+
+        class RecordApp:
+            def transcribe_record_field(self, path, field):
+                calls.append((path, field))
+                return {"question": "OCR q", "user_thoughts": "OCR thoughts", "reference_answer": "OCR answer"}[field]
+
+        self.state.application = lambda: RecordApp()
+
+        def popup(title, prompt, **kwargs):
+            loader = kwargs.get("image_loader")
+            if loader is None:
+                return next(paths)
+            loader()
+            if "1/3" in title:
+                return "edited q"
+            if "2/3" in title:
+                return "edited thoughts"
+            return "edited answer"
+
+        with patch("errgrind.cli.commands.popup_input", side_effect=popup), patch(
+            "errgrind.cli.commands.successmsg"
+        ), patch("errgrind.cli.commands.sysmsg"):
+            _cmd_record(self.state, "")
+
+        records = self.db.list_all_errors()
+        self.assertEqual(len(records), 1)
+        self.assertEqual((records[0].question, records[0].user_thoughts, records[0].reference_answer),
+                         ("edited q", "edited thoughts", "edited answer"))
+        self.assertEqual(records[0].origin, "ocr")
+        self.assertEqual(calls, [("/tmp/q.png", "question"), ("/tmp/thoughts.png", "user_thoughts"), ("/tmp/answer.png", "reference_answer")])
+
+    def test_record_cancel_after_successful_field_ocr_does_not_write(self):
+        class RecordApp:
+            def transcribe_record_field(self, path, field):
+                return "OCR text"
+
+        self.state.application = lambda: RecordApp()
+
+        def popup(title, prompt, **kwargs):
+            if kwargs.get("image_loader"):
+                kwargs["image_loader"]()
+                return "题目" if "1/3" in title else None
+            return "/tmp/image.png"
+
+        with patch("errgrind.cli.commands.popup_input", side_effect=popup), patch(
+            "errgrind.cli.commands.sysmsg"
+        ):
+            _cmd_record(self.state, "")
+        self.assertEqual(self.db.list_all_errors(), [])
+
+    def test_record_failed_image_ocr_preserves_draft_and_cancel_writes_nothing(self):
+        class RecordApp:
+            def transcribe_record_field(self, path, field):
+                raise RuntimeError("provider down")
+
+        self.state.application = lambda: RecordApp()
+
+        def popup(title, prompt, **kwargs):
+            if kwargs.get("image_loader"):
+                kwargs["image_loader"]()
+                return "draft" if "1/3" in title else None
+            return "/tmp/image.png"
+
+        with patch("errgrind.cli.commands.popup_input", side_effect=popup), patch(
+            "errgrind.cli.commands.popup_content"
+        ), patch("errgrind.cli.commands.sysmsg"):
+            _cmd_record(self.state, "")
+        self.assertEqual(self.db.list_all_errors(), [])
+
+    def test_record_ocr_then_cancel_any_field_never_writes(self):
+        class RecordApp:
+            def transcribe_record_field(self, path, field):
+                return "识别草稿"
+
+        self.state.application = lambda: RecordApp()
+        for cancelled_step in ("1/3", "2/3", "3/3"):
+            with self.subTest(cancelled_step=cancelled_step):
+                def popup(title, prompt, **kwargs):
+                    if "image_loader" not in kwargs:
+                        return "/tmp/image.png"
+                    self.assertEqual(kwargs["image_loader"](), "识别草稿")
+                    self.assertEqual(self.db.list_all_errors(), [])
+                    return None if cancelled_step in title else "已校对内容"
+
+                with patch("errgrind.cli.commands.popup_input", side_effect=popup), patch(
+                    "errgrind.cli.commands.sysmsg"
+                ):
+                    _cmd_record(self.state, "")
+                self.assertEqual(self.db.list_all_errors(), [])
+
+    def test_record_ocr_failure_or_interruption_can_finish_with_manual_text(self):
+        for failure in (RuntimeError("模型不可用"), KeyboardInterrupt(), EOFError()):
+            with self.subTest(failure=type(failure)):
+                class RecordApp:
+                    def transcribe_record_field(self, path, field):
+                        raise failure
+
+                self.state.application = lambda: RecordApp()
+
+                def popup(title, prompt, **kwargs):
+                    if "image_loader" not in kwargs:
+                        return "/tmp/image.png"
+                    if "1/3" in title:
+                        self.assertIsNone(kwargs["image_loader"]())
+                        return "手动题目"
+                    return "手动思路" if "2/3" in title else ""
+
+                previous_count = len(self.db.list_all_errors())
+                with patch("errgrind.cli.commands.popup_input", side_effect=popup), patch(
+                    "errgrind.cli.commands.popup_content"
+                ) as notice, patch("errgrind.cli.commands.sysmsg"), patch(
+                    "errgrind.cli.commands.successmsg"
+                ):
+                    _cmd_record(self.state, "")
+                records = self.db.list_all_errors()
+                self.assertEqual(len(records), previous_count + 1)
+                self.assertEqual(records[0].origin, "record")
+                self.assertEqual(records[0].question, "手动题目")
+                notice.assert_called_once()
+
+    def test_record_editor_interruptions_do_not_escape_command_or_write(self):
+        for interruption in (KeyboardInterrupt(), EOFError()):
+            with self.subTest(interruption=type(interruption)):
+                with patch("errgrind.cli.commands.popup_input", side_effect=interruption), patch(
+                    "errgrind.cli.commands.sysmsg"
+                ):
+                    _cmd_record(self.state, "")
+                self.assertEqual(self.db.list_all_errors(), [])
+
 
 class _ConversationLLM:
     def __init__(self, responses):

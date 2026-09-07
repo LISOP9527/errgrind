@@ -1,5 +1,6 @@
 from io import StringIO
 import re
+from typing import Callable
 from prompt_toolkit import Application, PromptSession
 from prompt_toolkit.completion import Completer, Completion, CompleteEvent
 from prompt_toolkit.formatted_text import HTML, ANSI, to_formatted_text
@@ -608,39 +609,78 @@ def popup_input(
     prompt_text: str,
     multiline: bool = True,
     initial_text: str = "",
+    image_loader: Callable[[], str | None] | None = None,
 ) -> str | None:
-    text_area = TextArea(text=initial_text, multiline=multiline, wrap_lines=True)
-    kb = KeyBindings()
+    """Show an editable popup, optionally allowing OCR text to be appended.
 
-    @kb.add("escape", "enter")
-    def _(event):
-        text_area.buffer.insert_text("\n")
+    The loader is deliberately called after ``Application.run`` returns.  This
+    keeps provider work outside prompt_toolkit's event loop and lets the popup
+    reopen with the user's draft intact.
+    """
+    draft = initial_text
+    while True:
+        text_area = TextArea(text=draft, multiline=multiline, wrap_lines=True)
+        text_area.buffer.cursor_position = len(draft)
+        kb = KeyBindings()
 
-    @kb.add("enter")
-    def _(event):
-        event.app.exit(result=text_area.text)
+        if image_loader is not None:
+            @kb.add("f2")
+            @kb.add("c-o")
+            def _(event):
+                event.app.exit(result=("image", text_area.text))
 
-    @kb.add("escape")
-    def _(event):
-        event.app.exit(result=None)
+        @kb.add("escape", "enter")
+        def _(event):
+            text_area.buffer.insert_text("\n")
 
-    footer_hint = "Alt+Enter 换行  │  Enter 提交  │  Esc 取消" if multiline else "Enter 提交  │  Esc 取消"
+        @kb.add("enter")
+        def _(event):
+            event.app.exit(result=text_area.text)
 
-    layout = HSplit([
-        Window(content=FormattedTextControl([
-            ("class:title", f"✦ {title}\n\n"),
-            ("", f"{prompt_text}"),
-        ]), dont_extend_height=True, wrap_lines=True),
-        Window(height=1, content=FormattedTextControl([("class:dim", "─" * 60)])),
-        Window(text_area.control),
-        Window(height=1, content=FormattedTextControl([("class:footer", f"{footer_hint}")]), align="center"),
-    ])
+        @kb.add("escape")
+        def _(event):
+            event.app.exit(result=None)
 
-    frame = Frame(layout, title=title)
-    container = Box(frame, padding=1)
+        @kb.add("c-c")
+        def _(event):
+            event.app.exit(result=None)
 
-    app = Application(layout=Layout(container), key_bindings=kb, style=GLOBAL_STYLE, full_screen=True)
-    return app.run()
+        footer_hint = "Alt+Enter 换行  │  Enter 提交  │  Esc 取消" if multiline else "Enter 提交  │  Esc 取消"
+        if image_loader is not None:
+            footer_hint = "F2 / Ctrl+O 添加图片  │  " + footer_hint
+
+        layout = HSplit([
+            Window(content=FormattedTextControl([
+                ("class:title", f"✦ {title}\n\n"),
+                ("", f"{prompt_text}"),
+            ]), dont_extend_height=True, wrap_lines=True),
+            Window(height=1, content=FormattedTextControl([("class:dim", "─" * 60)])),
+            Window(text_area.control),
+            Window(content=FormattedTextControl([("class:footer", footer_hint)]),
+                   align="center", wrap_lines=True, dont_extend_height=True),
+        ])
+
+        frame = Frame(layout, title=title)
+        container = Box(frame, padding=1)
+
+        app = Application(layout=Layout(container), key_bindings=kb, style=GLOBAL_STYLE, full_screen=True)
+        try:
+            result = app.run()
+        except (KeyboardInterrupt, EOFError):
+            # A popup cancellation must return to the command loop; callers
+            # decide whether a partial workflow can be resumed.
+            return None
+        if not (isinstance(result, tuple) and result and result[0] == "image"):
+            return result
+        draft = result[1]
+        assert image_loader is not None
+        try:
+            extracted = image_loader()
+        except (KeyboardInterrupt, EOFError):
+            # OCR interruption returns to this same field with its draft.
+            continue
+        if extracted:
+            draft = f"{draft}\n{extracted}" if draft else extracted
 
 
 def popup_content(body, title="", footer=""):

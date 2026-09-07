@@ -36,6 +36,75 @@ COMMANDS: dict = {}
 COMMAND_DESCRIPTIONS: dict[str, str] = {}
 
 
+def _record_image_loader(state, field, mark_ocr):
+    """Return a popup callback that obtains and transcribes one local image."""
+    def load():
+        image_path = popup_input(
+            "📷 添加图片",
+            "请输入图片路径（支持 PNG、JPEG、WebP，最大 20 MB；图片会发送给当前 AI provider）：",
+            multiline=False,
+        )
+        if not image_path or not image_path.strip():
+            return None
+        try:
+            with console.status("[bold cyan]🔎 正在识别图片...[/bold cyan]", spinner="dots"):
+                text = state.application().transcribe_record_field(image_path.strip(), field)
+        except (KeyboardInterrupt, EOFError):
+            popup_content("图片识别已取消，当前输入已保留。", title="图片识别")
+            return None
+        except Exception as exc:
+            popup_content(f"图片识别失败，当前输入已保留。\n\n{exc}", title="图片识别失败")
+            return None
+        if isinstance(text, str) and text.strip():
+            mark_ocr["used"] = True
+            return text.strip()
+        popup_content("图片识别未返回文字，当前输入已保留。", title="图片识别")
+        return None
+    return load
+
+
+def _record_form(state, initial_values=None):
+    """Collect and review all record fields, optionally with OCR prefills."""
+    initial_values = initial_values or {}
+    mark_ocr = {"used": False}
+
+    def field_input(title, prompt, field):
+        kwargs = {"image_loader": _record_image_loader(state, field, mark_ocr)}
+        if field in initial_values:
+            kwargs["initial_text"] = initial_values.get(field, "")
+        return popup_input(title, prompt, **kwargs)
+
+    question = field_input("📝 记录 Error (1/3)", "请粘贴你做错的题目：", "question")
+    if not question or not question.strip():
+        return None
+
+    while True:
+        user_thoughts = field_input(
+            "📝 记录 Error (2/3)",
+            "请写出你当时的思路，哪怕只有一句话；确实没有思路可填写「没有思路」：",
+            "user_thoughts",
+        )
+        if user_thoughts is None:
+            return None
+        if user_thoughts.strip():
+            break
+        errmsg("用户思路不能为空，请描述你当时是怎么想的")
+
+    reference_answer = field_input(
+        "📝 记录 Error (3/3)",
+        "若有参考答案请粘贴，若暂无请按 Enter 跳过：",
+        "reference_answer",
+    )
+    if reference_answer is None:
+        return None
+    return {
+        "question": question.strip(),
+        "user_thoughts": user_thoughts.strip() or None,
+        "reference_answer": reference_answer.strip() or None,
+        "origin": "ocr" if mark_ocr["used"] else "record",
+    }
+
+
 def _commit_llm_change(state, candidate, new_llm, save_config):
     """Persist and install a replacement client without leaking on failure."""
     try:
@@ -217,39 +286,18 @@ def _run_teaching(state: AppState, error):
         successmsg("讲解对话已保存，可随时继续")
 
 
-@_register("record", "记录一个 error")
+@_register("record", "记录一个 error（每个字段可按 F2 添加图片 OCR）")
 def _cmd_record(state, arg):
-    question = popup_input("📝 记录 Error (1/3)", "请粘贴你做错的题目：")
-    if not question or not question.strip():
+    try:
+        values = _record_form(state)
+    except (KeyboardInterrupt, EOFError):
+        sysmsg("记录已取消")
+        return
+    if values is None:
         sysmsg("记录已取消")
         return
 
-    while True:
-        user_thoughts = popup_input(
-            "📝 记录 Error (2/3)",
-            "请写出你当时的思路，哪怕只有一句话；确实没有思路可填写「没有思路」：",
-        )
-        if user_thoughts is None:
-            sysmsg("记录已取消")
-            return
-        if user_thoughts.strip():
-            break
-        errmsg("用户思路不能为空，请描述你当时是怎么想的")
-
-    reference_answer = popup_input(
-        "📝 记录 Error (3/3)",
-        "若有参考答案请粘贴，若暂无请按 Enter 跳过：",
-    )
-    if reference_answer is None:
-        sysmsg("记录已取消")
-        return
-
-    error_id = state.db.create_error(
-        question=question.strip(),
-        user_thoughts=user_thoughts.strip() or None,
-        reference_answer=reference_answer.strip() or None,
-        origin="record",
-    )
+    error_id = state.db.create_error(**values)
     successmsg(f"已成功录入错题库 (Error #{error_id})")
     sysmsg("输入 /resume 开始处理错题")
 
@@ -281,43 +329,17 @@ def _cmd_ocr(state, arg):
         errmsg(f"OCR 失败: {exc}")
         return
 
-    question = popup_input(
-        "📷 OCR 校对 (1/3)",
-        "请校对题目；可以直接修改识别错误：",
-        initial_text=extracted.get("question", ""),
-    )
-    if not question or not question.strip():
+    try:
+        values = _record_form(state, extracted)
+    except (KeyboardInterrupt, EOFError):
         sysmsg("OCR 录题已取消，未写入错题库")
         return
-
-    while True:
-        user_thoughts = popup_input(
-            "📷 OCR 校对 (2/3)",
-            "请校对你的原始思路；图片中没有思路时填写「没有思路」：",
-            initial_text=extracted.get("user_thoughts", ""),
-        )
-        if user_thoughts is None:
-            sysmsg("OCR 录题已取消，未写入错题库")
-            return
-        if user_thoughts.strip():
-            break
-        errmsg("用户思路不能为空，请描述你当时是怎么想的")
-
-    reference_answer = popup_input(
-        "📷 OCR 校对 (3/3)",
-        "请校对参考答案；图片中没有时可留空：",
-        initial_text=extracted.get("reference_answer", ""),
-    )
-    if reference_answer is None:
+    if values is None:
         sysmsg("OCR 录题已取消，未写入错题库")
         return
+    values["origin"] = "ocr"
 
-    error_id = state.db.create_error(
-        question=question.strip(),
-        user_thoughts=user_thoughts.strip(),
-        reference_answer=reference_answer.strip() or None,
-        origin="ocr",
-    )
+    error_id = state.db.create_error(**values)
     successmsg(f"OCR 校对完成，已录入错题库 (Error #{error_id})")
     sysmsg("输入 /resume 开始处理错题")
 
@@ -604,7 +626,7 @@ def _cmd_model(state, arg):
 def _cmd_help(state, arg):
     groups = [
         ("📝 错题与演练工作流", [
-            ("/record", "录入一个新的 error (进入 pending-grill)"),
+            ("/record", "录入新的 error（各字段可按 F2 添加图片 OCR，进入 pending-grill）"),
             ("/ocr [路径]", "识别图片，校对后录入 error"),
             ("/resume", "打开双栏工作台 (进行 Grill 诊断 / Teach 讲解)"),
             ("/drill", "结合近期 error 生成综合演练测试题"),

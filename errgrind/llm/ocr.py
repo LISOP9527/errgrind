@@ -22,6 +22,13 @@ OCR_OUTPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
+TEXT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"text": {"type": "string"}},
+    "required": ["text"],
+    "additionalProperties": False,
+}
+
 
 class OcrError(Exception):
     """User-facing OCR validation or response error."""
@@ -106,3 +113,23 @@ def parse_ocr_result(value: Any) -> dict[str, str]:
     if not result["question"]:
         raise OcrError("没有从图片中识别出题目，请换一张更清晰的图片")
     return result
+
+
+def parse_text_result(value: Any) -> str:
+    """Parse the small contract used for field-specific image transcription."""
+    if isinstance(value, str):
+        cleaned = value.strip().removeprefix("```json").removeprefix("```")
+        cleaned = cleaned.removesuffix("```").strip()
+        try:
+            value = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            raise OcrError(f"转录响应不是合法 JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise OcrError("转录响应必须是 JSON 对象")
+    text = value.get("text", "")
+    if not isinstance(text, str):
+        raise OcrError("转录字段 text 必须是文本")
+    text = text.strip()
+    if not text:
+        raise OcrError("没有识别出当前字段的文字，请换一张图片或手动输入")
+    return text

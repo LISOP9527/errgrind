@@ -9,6 +9,8 @@ from .contracts import (
     DrillPreparation,
     DrillStage,
     GrillResult,
+    OutputContractError,
+    WorkflowModelError,
     public_error,
 )
 from .drill import DrillWorkflow
@@ -36,6 +38,34 @@ class ErrGrindApplication:
 
     def delete_error(self, error_id: int) -> None:
         self.db.delete_error(error_id)
+
+    def transcribe_record_field(self, image_path: str, field: str) -> str:
+        """Return an unpersisted OCR draft for one field, for human review."""
+        from ..llm.ocr import OcrError
+
+        fields = {
+            "question": "题目",
+            "user_thoughts": "用户当时的思路或作答",
+            "reference_answer": "参考答案",
+        }
+        if field not in fields:
+            raise OutputContractError("不支持的录题字段")
+        transcribe = getattr(self.llm, "transcribe_image", None)
+        if not callable(transcribe):
+            raise WorkflowModelError("当前 AI provider 不支持字段图片识别，请切换 provider")
+        try:
+            prompt = self.prompts.load("ocr_field.md").format(field=fields[field])
+            result = transcribe(image_path, prompt)
+        except (KeyboardInterrupt, EOFError):
+            raise
+        except OcrError as exc:
+            raise OutputContractError(str(exc)) from exc
+        except Exception as exc:
+            # 模型原始响应不是面向用户的错误说明，也不能作为录题文本回填。
+            raise WorkflowModelError("图片识别失败，请重试或检查当前模型是否支持图片") from exc
+        if not isinstance(result, str) or not result.strip():
+            raise OutputContractError("没有识别出当前字段的文字，请换一张图片或手动输入")
+        return result.strip()
 
     def start_or_resume_grill(
         self,

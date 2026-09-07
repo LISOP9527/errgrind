@@ -14,7 +14,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .ocr import OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result
+from .ocr import (
+    OCR_OUTPUT_SCHEMA,
+    TEXT_OUTPUT_SCHEMA,
+    OcrError,
+    load_image,
+    parse_ocr_result,
+    parse_text_result,
+)
 
 
 class CodexError(Exception):
@@ -165,8 +172,10 @@ class CodexClient:
         }
         return self._sdk.thread_start(**kwargs), prompt
 
-    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
-        """Transcribe one local image through the official image input API."""
+    def _image_json(
+        self, image_path: str, prompt: str, output_schema: dict, parser: Callable[[Any], Any]
+    ) -> Any:
+        """Submit one local image through the official image input API."""
         payload = load_image(image_path)
         (
             _Codex,
@@ -198,23 +207,33 @@ class CodexClient:
                         LocalImageInput(payload.path),
                     ],
                     model=self.model,
-                    output_schema=OCR_OUTPUT_SCHEMA,
+                    output_schema=output_schema,
                     **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
                 )
                 result = turn.run()
-                return parse_ocr_result(_result_text(result))
-            except KeyboardInterrupt:
+                return parser(_result_text(result))
+            except (KeyboardInterrupt, EOFError):
                 if turn is not None:
                     try:
                         turn.interrupt()
                     except Exception:
                         pass
                 raise
+            except OcrError:
+                raise
             except Exception as exc:
                 last = exc
             if attempt + 1 < self.max_retries:
                 time.sleep(2**attempt)
         raise CodexError(f"Codex OCR 调用失败: {last}") from last
+
+    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
+        """Transcribe one local image through the official image input API."""
+        return self._image_json(image_path, prompt, OCR_OUTPUT_SCHEMA, parse_ocr_result)
+
+    def transcribe_image(self, image_path: str, prompt: str) -> str:
+        """Transcribe one requested image field, including thought-only images."""
+        return self._image_json(image_path, prompt, TEXT_OUTPUT_SCHEMA, parse_text_result)
 
     def chat(self, messages: list[dict], **kwargs: Any) -> str:
         last: Exception | None = None

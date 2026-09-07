@@ -1,5 +1,13 @@
 # 当前进度与验证记录
 
+## 2026-09-06：录题字段内图片输入
+
+- `/record` 的题目、思路和参考答案窗口分别支持添加图片；识别文字追加到草稿，可继续编辑并重复添加图片，最终保存为一条 `pending-grill` Error。
+- 字段 OCR 使用独立 `text` 契约，思路图、答案图无需包含题目。Application 组装字段 Prompt 并校验草稿，三类 provider 复用现有图片传输。
+- 成功使用 OCR 的记录保留 `origin=ocr`，纯文字录入为 `record`；原图不入库。旧 `/ocr [路径]` 保留整图识别入口。
+- F2 / Ctrl+O 添加图片，识别后回到当前字段继续编辑；失败或中断保留已有草稿。`/record` 与 `/ocr` 共用字段编辑和必填校验。
+- 验证（2026-09-07）：取消代理环境变量后完整离线回归 167 项通过，包含真实 prompt_toolkit 按键输入、重复图片、草稿保留、字段路由、取消不入库及三类 provider 的格式测试；`git diff --check` 通过。未调用真实图片识别 API。
+
 ## 2026-09-06：Codex 模型选择与 reasoning effort
 
 - `/model` 在选择 Codex 模型后配置 effort；新增 `/effort` 与 `/config` 入口，保存 `reasoning_effort`，并传给普通、流式、JSON、OCR 请求。默认不覆盖 Codex 自身设置。

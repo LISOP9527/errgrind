@@ -2,12 +2,19 @@ import os
 import json
 import time
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
 from ..config import DEFAULT_GEMINI_MODEL
-from .ocr import OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result
+from .ocr import (
+    OCR_OUTPUT_SCHEMA,
+    TEXT_OUTPUT_SCHEMA,
+    OcrError,
+    load_image,
+    parse_ocr_result,
+    parse_text_result,
+)
 
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -188,8 +195,9 @@ class GeminiClient:
                     ]
         raise GeminiError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")
 
-    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
-        """Transcribe an image with Gemini inline image data."""
+    def _image_json(
+        self, image_path: str, prompt: str, output_schema: dict, parser: Callable[[Any], Any]
+    ) -> Any:
         payload = load_image(image_path)
         body = {
             "system_instruction": {"parts": [{"text": prompt}]},
@@ -209,7 +217,7 @@ class GeminiClient:
             ],
             "generationConfig": {
                 "response_mime_type": "application/json",
-                "response_schema": OCR_OUTPUT_SCHEMA,
+                "response_schema": output_schema,
                 "temperature": 0.0,
             },
         }
@@ -224,9 +232,19 @@ class GeminiClient:
                     timeout=self.timeout,
                 )
                 response.raise_for_status()
-                return parse_ocr_result(self._response_text(response.json()))
+                return parser(self._response_text(response.json()))
+            except (OcrError, EOFError):
+                raise
             except Exception as exc:
                 last = exc
                 if attempt + 1 < self.max_retries:
                     time.sleep(2**attempt)
         raise GeminiError(f"Gemini OCR 调用失败: {last}") from last
+
+    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
+        """Transcribe an image with Gemini inline image data."""
+        return self._image_json(image_path, prompt, OCR_OUTPUT_SCHEMA, parse_ocr_result)
+
+    def transcribe_image(self, image_path: str, prompt: str) -> str:
+        """Transcribe one requested image field, including thought-only images."""
+        return self._image_json(image_path, prompt, TEXT_OUTPUT_SCHEMA, parse_text_result)

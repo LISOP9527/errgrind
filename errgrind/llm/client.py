@@ -6,7 +6,7 @@ from typing import Optional
 
 from openai import OpenAI
 
-from .ocr import load_image, parse_ocr_result
+from .ocr import TEXT_OUTPUT_SCHEMA, OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result, parse_text_result
 
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -120,10 +120,9 @@ class LLMClient:
                     ]
         raise LLMError(f"JSON 解析失败: {last_error}\n原始响应: {last_text}")
 
-    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
-        """Use the OpenAI-compatible multimodal message format for OCR."""
+    def _image_json(self, image_path: str, prompt: str, output_schema: dict) -> dict:
         payload = load_image(image_path)
-        result = self.chat_json(
+        return self.chat_json(
             [
                 {"role": "system", "content": prompt},
                 {
@@ -139,6 +138,17 @@ class LLMClient:
                         },
                     ],
                 },
-            ]
+            ],
+            output_schema=output_schema,
         )
+
+    def ocr_image(self, image_path: str, prompt: str) -> dict[str, str]:
+        """Use the OpenAI-compatible multimodal message format for OCR."""
+        result = self._image_json(image_path, prompt, OCR_OUTPUT_SCHEMA)
         return parse_ocr_result(result)
+
+    def transcribe_image(self, image_path: str, prompt: str) -> str:
+        """Transcribe one requested image field, including thought-only images."""
+        return parse_text_result(
+            self._image_json(image_path, prompt, TEXT_OUTPUT_SCHEMA)
+        )

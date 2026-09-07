@@ -8,7 +8,7 @@ from unittest.mock import patch
 from errgrind.cli import app
 from errgrind.config import DEFAULT_CODEX_MODEL, load
 from errgrind.llm.codex import CodexClient
-from errgrind.llm.ocr import OCR_OUTPUT_SCHEMA
+from errgrind.llm.ocr import OCR_OUTPUT_SCHEMA, TEXT_OUTPUT_SCHEMA, OcrError
 
 
 class FakeTextInput:
@@ -209,6 +209,66 @@ class CodexProviderTests(unittest.TestCase):
         self.assertEqual(turn_kwargs["effort"], "high")
         self.assertEqual(sdk.calls[0]["sandbox"], "read")
         self.assertEqual(sdk.calls[0]["approval_mode"], "deny")
+
+    def test_transcribe_uses_local_image_text_schema_and_effort(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "thought.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            thread = FakeThread(text=json.dumps({"text": "先通分"}, ensure_ascii=False))
+            sdk = FakeSDK(thread)
+            client = CodexClient(sdk=sdk, reasoning_effort="high")
+            self.addCleanup(client.close)
+
+            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
+                result = client.transcribe_image(str(image_path), "只转录思路")
+
+        self.assertEqual(result, "先通分")
+        turn_input, turn_kwargs = thread.run_calls[0]
+        self.assertIsInstance(turn_input[0], FakeTextInput)
+        self.assertIsInstance(turn_input[1], FakeLocalImageInput)
+        self.assertEqual(turn_input[1].path, str(image_path.resolve()))
+        self.assertEqual(turn_kwargs["output_schema"], TEXT_OUTPUT_SCHEMA)
+        self.assertEqual(turn_kwargs["effort"], "high")
+
+    def test_transcribe_empty_response_is_validation_error_without_retry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "thought.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            thread = FakeThread(text='{"text":"  "}')
+            sdk = FakeSDK(thread)
+            client = CodexClient(sdk=sdk, max_retries=3)
+            self.addCleanup(client.close)
+
+            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
+                with self.assertRaisesRegex(OcrError, "没有识别出当前字段"):
+                    client.transcribe_image(str(image_path), "只转录思路")
+
+        self.assertEqual(len(thread.run_calls), 1)
+
+    def test_transcribe_eof_interrupts_active_turn(self):
+        class EofTurn(FakeTurn):
+            def run(self):
+                raise EOFError
+
+        class Thread(FakeThread):
+            def turn(self, prompt, **kwargs):
+                self.run_calls.append((prompt, kwargs))
+                self.turn_handle = EofTurn([])
+                return self.turn_handle
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "thought.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            thread = Thread()
+            sdk = FakeSDK(thread)
+            client = CodexClient(sdk=sdk)
+            self.addCleanup(client.close)
+
+            with patch("errgrind.llm.codex._load_sdk", return_value=self.SDK_TYPES):
+                with self.assertRaises(EOFError):
+                    client.transcribe_image(str(image_path), "只转录思路")
+
+        self.assertTrue(thread.turn_handle.interrupted)
 
     def test_auth_helpers_delegate_to_sdk(self):
         sdk = FakeSDK(FakeThread())
