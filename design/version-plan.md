@@ -48,15 +48,19 @@ Error → Grill → Teach → Drill → new Error / Evidence
 `pending-grill → pending-teach → done`，会话中断、完成后只读和 Teach 可继续等语义沿用
 [会话生命周期决策](decisions/2026-07-27-conversation-lifecycle.md)。
 
-V1 的主要 Evidence anchor 是真实发生的 Error，以及相关 Grill 中用户的回顾与回答。
+V1 Evidence 以 authentic Error episode 为主要 anchor；该 episode 内的原始作答/行为、
+记录的思路（`initial_user_thoughts`）、回顾性重建和 grounded Grill 回答可以成为 Evidence。
+脱离这种有 Error anchor 的诊断 episode 的任意聊天消息，不自动成为 Evidence。
 题目和参考答案提供解释上下文，模型的解释或预测不能冒充行为 Evidence。
 录题思路属于 retrospective reconstruction，是可能遗漏或有偏差的 noisy Evidence；必须区分过去思路与当前理解。
 Grill 推断 Error-time failure mechanism，不恢复完整 post-interference cognitive state 或干预后因果链。
 相关观察可以保存供审计，但不能据此声称某次 Teach/Drill 导致了变化。
 
-Drill 中实际犯下的数学错误同样是真实 Error，但来源是 controlled/intervention context。
-必须保留 provenance 和 lineage；它不自动成为自然学习中的独立 Future Error，不进入该类 recurrence 统计，
-也不自动提升长期 Pattern 的证据级别。详见[来源与 Drill 账本](decisions/2026-09-01-evidence-provenance-drill-ledger.md)、
+用户在有效 Drill 中真实犯下的错误是 authentic Error event。它与自然发生的 Error 主要区别在于
+provenance、context 和 independence，而非真假或固定的 Evidence 质量等级。
+必须保留 controlled/intervention provenance 和 lineage，不能自动计为独立的自然 recurrence；
+用于长期 Pattern 更新时，应评估其独立性与诊断价值，不能仅因来源是 Drill 就自动升级或降级 Evidence。
+这不改变现有自然 Future Error 统计与 Candidate 更新规则。详见[来源与 Drill 账本](decisions/2026-09-01-evidence-provenance-drill-ledger.md)、
 [Pattern State 提案](pattern-state-proposal.md)和[验证策略](evaluation-strategy.md)。
 
 普通聊天、通用画像、无关 memory 不自动成为 Evidence。长期架构列出的 broader chat、Coding、Near Miss、
