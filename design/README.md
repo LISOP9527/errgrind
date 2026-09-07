@@ -4,6 +4,7 @@
 
 ## 设计文档
 
+- [版本规划 / Version Plan](version-plan.md)：V1 Core → V1 Product / UX → V2 的开发顺序、验收方向与有意推迟的长期能力。
 - [长期架构](long-term-architecture.md)：Evidence -> State -> Policy -> Action -> New Evidence 的系统闭环。
 - [核心原则](core-principles.md)：ErrGrind 如何围绕 Evidence、可更新 State、Policy 和减少未来 Error 设计。
 - [Pattern State 演进提案](pattern-state-proposal.md)：从单次 Grill 假设逐步建立可审查、可证伪的 Pattern State，区分真实 Evidence 与干预结果。

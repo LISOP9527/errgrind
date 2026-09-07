@@ -161,6 +161,8 @@ MVP 可以从低负担方案开始，而不是记录全部学习行为：
 
 ## 推荐的下一项产品实验
 
+以下是进入长期 Pattern 阶段时的候选实验；按[版本规划](version-plan.md)，V1 先验证核心闭环与 UX，相关 State / review 依赖留待 V2 评估。
+
 先不要扩展更多 Action。选择少量真实 Error，人工审阅其 Pattern Observation；后续新 Error 使用两阶段盲法关联。同时以尽量低负担的方式记录相关 opportunity。观察用户是否愿意完成 review、Observation 是否忠实、Candidate 是否真的复现，以及 opportunity 数据是否可持续采集。
 
 这个实验首先验证 Thinking Model 是否值得建立，再决定是否投入自动聚类、复杂 Policy 或进步看板。
