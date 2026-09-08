@@ -4,8 +4,6 @@ import time
 from collections.abc import Callable
 from typing import Optional
 
-from openai import OpenAI
-
 from .ocr import TEXT_OUTPUT_SCHEMA, OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result, parse_text_result
 
 
@@ -28,6 +26,9 @@ class LLMClient:
         api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
             raise LLMError("DEEPSEEK_API_KEY 未设置")
+        # 只有兼容 OpenAI 的提供商需要此 SDK，避免拖慢其他提供商的启动。
+        from openai import OpenAI
+
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.max_retries = max_retries

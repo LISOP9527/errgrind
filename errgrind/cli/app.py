@@ -324,20 +324,11 @@ def _make_llm(cfg):
             model=cfg.get("model", "deepseek-v4-flash"),
         )
     if provider == "codex":
-        client = info[1](
+        # 启动不访问登录服务；实际请求负责检查凭据，并在需要时刷新。
+        return info[1](
             model=cfg.get("model", DEFAULT_CODEX_MODEL),
             reasoning_effort=cfg.get("reasoning_effort"),
         )
-        try:
-            if not _codex_logged_in(client.account(refresh_token=True)):
-                raise CodexError("ChatGPT Codex 尚未登录，请在 /config 中重新选择 codex")
-        except CodexError:
-            client.close()
-            raise
-        except Exception as exc:
-            client.close()
-            raise CodexError(f"无法读取 ChatGPT 登录状态: {exc}") from exc
-        return client
     return info[1](
         api_key=api_key,
         base_url=DEEPSEEK_BASE_URL,
@@ -358,11 +349,7 @@ def _ensure_config():
             for key in stale_fields:
                 cfg.pop(key, None)
             save_config(cfg)
-        # Codex keeps OAuth credentials in its own app-server/CLI store.  A
-        # saved ErrGrind config contains no authentication state, so make
-        # an unauthenticated first run useful instead of failing before the
-        # command loop (where /config would otherwise be unreachable).
-        _configure_codex_login()
+        # 已保存配置直接进入命令行；需要登录时仍可通过 /config 操作。
         return cfg
     if cfg.get("api_key"):
         if cfg.get("provider") == "opencode" and cfg.get("base_url") == OLD_ZEN_URL:
