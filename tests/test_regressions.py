@@ -292,6 +292,7 @@ class StreamingTests(unittest.TestCase):
             "chat": type("Chat", (), {"completions": completions})()
         })()
         client.model = "test-model"
+        client.provider = "openai_compatible"
         client.max_retries = 2
         return client, completions
 

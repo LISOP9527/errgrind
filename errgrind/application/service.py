@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from typing import Optional
+from ..llm.usage import usage_action, usage_scope
 
 from .contracts import (
     ConversationResult,
@@ -39,6 +40,7 @@ class ErrGrindApplication:
     def delete_error(self, error_id: int) -> None:
         self.db.delete_error(error_id)
 
+    @usage_action("record", "ocr_field")
     def transcribe_record_field(self, image_path: str, field: str) -> str:
         """Return an unpersisted OCR draft for one field, for human review."""
         from ..llm.ocr import OcrError
@@ -55,7 +57,8 @@ class ErrGrindApplication:
             raise WorkflowModelError("当前 AI provider 不支持字段图片识别，请切换 provider")
         try:
             prompt = self.prompts.load("ocr_field.md").format(field=fields[field])
-            result = transcribe(image_path, prompt)
+            with usage_scope(stage="ocr_" + field):
+                result = transcribe(image_path, prompt)
         except (KeyboardInterrupt, EOFError):
             raise
         except OcrError as exc:

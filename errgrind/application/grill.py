@@ -6,6 +6,8 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..llm.usage import usage_action, usage_scope
+
 from .contracts import (
     ErrorNotFound,
     GrillResult,
@@ -99,6 +101,7 @@ class GrillWorkflow:
         self.llm = llm
         self.prompts = prompts
 
+    @usage_action("grill", "turn")
     def start_or_resume(
         self, error_id: int, *, on_token: Optional[Callable[[str], None]] = None
     ) -> GrillResult:
@@ -149,6 +152,7 @@ class GrillWorkflow:
             state=GrillState.ACTIVE,
         )
 
+    @usage_action("grill", "turn")
     def submit_answer(
         self,
         error_id: int,
@@ -340,7 +344,8 @@ class GrillWorkflow:
             },
         ]
         try:
-            repaired = self._chat_json(repair_messages)
+            with usage_scope(repair_attempt=2):
+                repaired = self._chat_json(repair_messages)
         except _LegacyJsonFixture as exc:
             raise OutputContractError("Grill 输出契约修复失败：没有得到第二份 JSON 输出") from exc
         except _MalformedStructuredResponse:

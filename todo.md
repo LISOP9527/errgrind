@@ -109,3 +109,11 @@ Ran 61 tests ... OK
 
 尚未宣称：Gemini、DeepSeek、OpenCode 的图片 OCR 只完成离线请求格式回归，未在本轮发送真实
 图片请求；其中 DeepSeek/OpenCode 是否支持图片仍取决于具体模型。
+
+
+## 2026-09-08：按阶段记录模型实际用量
+
+- 默认启用不含正文/凭证的本地轮转 JSONL 日志，记录 action、stage、模型、输入/缓存/输出/推理用量、耗时与请求结果。
+- 关联 Grill/Teach/OCR 与 Drill Spec/Draft/Judge 的调用，区分应用契约修复和 JSON 解析重试；缺失 usage 保留为未知。
+- 增加 `python -m errgrind.usage_report --days 7` 本地汇总，保留逐字段统计覆盖次数；当前不调整模型、Prompt 或重试策略。
+- 验证：仅含本次日志变更的暂存版本通过 206 项离线测试；包含既有目录改动的工作区通过 211 项。`git diff --check` 通过，测试日志隔离在临时目录，未调用真实 API。

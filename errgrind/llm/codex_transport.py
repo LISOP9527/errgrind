@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from .usage import record_http_status, record_usage
+
 
 CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 
@@ -101,6 +103,7 @@ class CodexResponsesTransport:
                 "POST", CODEX_RESPONSES_URL, headers=headers, json=body, follow_redirects=False
             )
             with response_context as response:
+                record_http_status(response.status_code)
                 if response.status_code != 200:
                     retryable = response.status_code in {408, 429} or response.status_code >= 500
                     raise CodexTransportError(
@@ -150,6 +153,9 @@ class CodexResponsesTransport:
                     )
                 )
             ):
+                response = event.get("response", event)
+                if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+                    record_usage(response["usage"], "codex")
                 raise CodexTransportError("Codex 响应未完成", retryable=False)
             if kind in {"response.output_item.added", "response.output_item.done"}:
                 item = event.get("item")
@@ -181,6 +187,8 @@ class CodexResponsesTransport:
                 return
             if kind in {"response.completed", "response.done"}:
                 response = event.get("response", event)
+                if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+                    record_usage(response["usage"], "codex")
                 if not isinstance(response, dict) or response.get("status") != "completed":
                     raise CodexTransportError("Codex 响应未完成", retryable=False)
                 terminal = True

@@ -15,6 +15,7 @@ from .ocr import (
     parse_ocr_result,
     parse_text_result,
 )
+from .usage import model_attempt, usage_scope
 
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -76,6 +77,12 @@ class GeminiClient:
         parts = candidates[0].get("content", {}).get("parts", [])
         return "".join(part.get("text", "") for part in parts)
 
+    @staticmethod
+    def _record_usage(attempt, data: dict) -> None:
+        usage = data.get("usageMetadata") if isinstance(data, dict) else None
+        if usage is not None:
+            attempt.record_usage(usage, "gemini")
+
     def chat(self, messages: list[dict], **kwargs) -> str:
         body = self._request_body(messages, kwargs)
 
@@ -83,14 +90,18 @@ class GeminiClient:
 
         for attempt in range(self.max_retries):
             try:
-                resp = httpx.post(
-                    url,
-                    params={"key": self.api_key},
-                    json=body,
-                    timeout=self.timeout,
-                )
-                resp.raise_for_status()
-                return self._response_text(resp.json())
+                with model_attempt("gemini", self.model) as usage_attempt:
+                    resp = httpx.post(
+                        url,
+                        params={"key": self.api_key},
+                        json=body,
+                        timeout=self.timeout,
+                    )
+                    usage_attempt.set_http_status(getattr(resp, "status_code", None))
+                    resp.raise_for_status()
+                    data = resp.json()
+                    self._record_usage(usage_attempt, data)
+                    return self._response_text(data)
             except Exception as e:
                 if attempt < self.max_retries - 1:
                     time.sleep(2 ** attempt)
@@ -111,34 +122,40 @@ class GeminiClient:
         for attempt in range(self.max_retries):
             collected = []
             try:
-                with httpx.stream(
-                    "POST",
-                    url,
-                    params={"key": self.api_key, "alt": "sse"},
-                    json=body,
-                    timeout=self.timeout,
-                ) as resp:
-                    resp.raise_for_status()
-                    event_data = []
-                    for line in resp.iter_lines():
-                        if not line:
-                            if event_data:
-                                token = self._stream_response_text(json.loads("\n".join(event_data)))
-                                if token:
-                                    collected.append(token)
-                                    on_token(token)
-                                event_data = []
-                            continue
-                        if line.startswith("data:"):
-                            event_data.append(line[5:].lstrip())
-                    if event_data:
-                        token = self._stream_response_text(json.loads("\n".join(event_data)))
-                        if token:
-                            collected.append(token)
-                            on_token(token)
-                if not collected:
-                    raise GeminiError("Gemini 流式 API 响应中没有文本")
-                return "".join(collected)
+                with model_attempt("gemini", self.model) as usage_attempt:
+                    with httpx.stream(
+                        "POST",
+                        url,
+                        params={"key": self.api_key, "alt": "sse"},
+                        json=body,
+                        timeout=self.timeout,
+                    ) as resp:
+                        usage_attempt.set_http_status(getattr(resp, "status_code", None))
+                        resp.raise_for_status()
+                        event_data = []
+                        for line in resp.iter_lines():
+                            if not line:
+                                if event_data:
+                                    data = json.loads("\n".join(event_data))
+                                    self._record_usage(usage_attempt, data)
+                                    token = self._stream_response_text(data)
+                                    if token:
+                                        collected.append(token)
+                                        on_token(token)
+                                    event_data = []
+                                continue
+                            if line.startswith("data:"):
+                                event_data.append(line[5:].lstrip())
+                        if event_data:
+                            data = json.loads("\n".join(event_data))
+                            self._record_usage(usage_attempt, data)
+                            token = self._stream_response_text(data)
+                            if token:
+                                collected.append(token)
+                                on_token(token)
+                    if not collected:
+                        raise GeminiError("Gemini 流式 API 响应中没有文本")
+                    return "".join(collected)
             except Exception as e:
                 if collected:
                     raise GeminiError(f"Gemini 流式 API 调用中断: {e}") from e
@@ -165,7 +182,8 @@ class GeminiClient:
         last_error = None
         last_text = ""
         for attempt in range(json_attempts):
-            last_text = self.chat(retry_messages, generationConfig=config, **kwargs)
+            with usage_scope(json_attempt=attempt + 1):
+                last_text = self.chat(retry_messages, generationConfig=config, **kwargs)
             try:
                 if not isinstance(last_text, str):
                     raise TypeError("响应内容必须是文本")
@@ -225,14 +243,18 @@ class GeminiClient:
         last: Exception | None = None
         for attempt in range(self.max_retries):
             try:
-                response = httpx.post(
-                    url,
-                    params={"key": self.api_key},
-                    json=body,
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
-                return parser(self._response_text(response.json()))
+                with model_attempt("gemini", self.model) as usage_attempt:
+                    response = httpx.post(
+                        url,
+                        params={"key": self.api_key},
+                        json=body,
+                        timeout=self.timeout,
+                    )
+                    usage_attempt.set_http_status(getattr(response, "status_code", None))
+                    response.raise_for_status()
+                    data = response.json()
+                    self._record_usage(usage_attempt, data)
+                    return parser(self._response_text(data))
             except (OcrError, EOFError):
                 raise
             except Exception as exc:

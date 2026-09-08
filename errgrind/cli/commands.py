@@ -1,4 +1,5 @@
 import json
+from ..llm.usage import usage_scope
 
 from rich.live import Live
 from rich.panel import Panel
@@ -321,7 +322,8 @@ def _cmd_ocr(state, arg):
     try:
         prompt = state.prompts.load("ocr.md")
         with console.status("[bold cyan]🔎 正在识别数学题图片...[/bold cyan]", spinner="dots"):
-            extracted = ocr_image(image_path.strip(), prompt)
+            with usage_scope(action="ocr", stage="transcribe"):
+                extracted = ocr_image(image_path.strip(), prompt)
     except (KeyboardInterrupt, EOFError):
         sysmsg("OCR 录题已取消")
         return

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .codex_transport import CodexResponsesTransport, CodexTransportError
+from .usage import model_attempt, usage_scope
 from .ocr import (
     OCR_OUTPUT_SCHEMA, TEXT_OUTPUT_SCHEMA, load_image,
     parse_ocr_result, parse_text_result,
@@ -183,12 +184,18 @@ class CodexClient:
         while True:
             collected: list[str] = []
             try:
-                with closing(self._transport.stream(body, *credentials)) as stream:
-                    for token in stream:
-                        collected.append(token)
-                        if on_token is not None:
-                            on_token(token)
-                return "".join(collected)
+                effort = body.get("reasoning", {}).get("effort")
+                with model_attempt(
+                    provider="codex",
+                    model=body.get("model", self.model),
+                    reasoning_effort=effort if isinstance(effort, str) else None,
+                ):
+                    with closing(self._transport.stream(body, *credentials)) as stream:
+                        for token in stream:
+                            collected.append(token)
+                            if on_token is not None:
+                                on_token(token)
+                    return "".join(collected)
             except CodexTransportError as exc:
                 # Once generated text exists, replay could change the answer
                 # or repeat visible output, even if no callback was supplied.
@@ -238,19 +245,20 @@ class CodexClient:
         retry_messages = list(messages)
         last_text = ""
         for attempt in range(json_attempts):
-            last_text = self.chat(retry_messages, **kwargs)
-            try:
-                result = json.loads(last_text)
-                if not isinstance(result, dict):
-                    raise ValueError("顶层必须是 JSON 对象")
-                return result
-            except (json.JSONDecodeError, TypeError, ValueError):
-                if attempt + 1 < json_attempts:
-                    retry_messages = [
-                        *messages,
-                        {"role": "assistant", "content": last_text},
-                        {"role": "user", "content": "只输出完整合法 JSON 对象。"},
-                    ]
+            with usage_scope(json_attempt=attempt + 1):
+                last_text = self.chat(retry_messages, **kwargs)
+                try:
+                    result = json.loads(last_text)
+                    if not isinstance(result, dict):
+                        raise ValueError("顶层必须是 JSON 对象")
+                    return result
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    if attempt + 1 < json_attempts:
+                        retry_messages = [
+                            *messages,
+                            {"role": "assistant", "content": last_text},
+                            {"role": "user", "content": "只输出完整合法 JSON 对象。"},
+                        ]
         # Application recognizes this prefix as a repairable contract error.
         raise CodexError("JSON 解析失败：Codex 返回的内容不是合法 JSON 对象") from None
 

@@ -3,6 +3,7 @@
 import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+from ..llm.usage import usage_action
 
 from .contracts import (
     ConversationResult,
@@ -27,6 +28,7 @@ class TeachWorkflow:
         self.llm = llm
         self.prompts = prompts
 
+    @usage_action("teach", "reply")
     def start_or_resume(
         self,
         error_id: int,
@@ -64,6 +66,7 @@ class TeachWorkflow:
             )
         return ConversationResult(public_error(self._error(error_id)), messages, None, resumed)
 
+    @usage_action("teach", "reply")
     def submit_answer(
         self,
         error_id: int,

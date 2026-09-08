@@ -6,6 +6,8 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from ..llm.usage import usage_action, usage_scope
+
 from .contracts import (
     DrillJudgment,
     DrillPreparation,
@@ -241,6 +243,7 @@ class DrillWorkflow:
         self.prompts = prompts
         self.cfg = cfg
 
+    @usage_action("drill", "prepare")
     def prepare(
         self, *, on_stage: Callable[[DrillStage], None] | None = None
     ) -> DrillPreparation:
@@ -267,6 +270,7 @@ class DrillWorkflow:
             reference_answer,
         )
 
+    @usage_action("drill", "judge")
     def judge_and_record(
         self, preparation: DrillPreparation, user_response: str
     ) -> DrillJudgment:
@@ -279,9 +283,10 @@ class DrillWorkflow:
             success_signal=preparation.drill_spec["target_pattern"]["success_signal"],
         )
         try:
-            judgment = self.llm.chat_json(
-                [{"role": "user", "content": prompt}], output_schema=JUDGE_SCHEMA
-            )
+            with usage_scope(error_id=preparation.source_error_id):
+                judgment = self.llm.chat_json(
+                    [{"role": "user", "content": prompt}], output_schema=JUDGE_SCHEMA
+                )
         except Exception as exc:
             raise WorkflowModelError(f"判分失败: {exc}") from exc
         is_correct, feedback = judgment.get("is_correct"), judgment.get("feedback")
@@ -324,7 +329,8 @@ class DrillWorkflow:
         ]
         for attempt in range(3):
             try:
-                raw = self.llm.chat_json(messages, output_schema=DRILL_SPEC_SCHEMA)
+                with usage_scope(stage="spec", repair_attempt=attempt + 1):
+                    raw = self.llm.chat_json(messages, output_schema=DRILL_SPEC_SCHEMA)
             except Exception as exc:
                 raise WorkflowModelError(f"提炼出题规格失败: {exc}") from exc
             try:
@@ -360,7 +366,8 @@ class DrillWorkflow:
         ]
         for attempt in range(2):
             try:
-                draft = self.llm.chat_json(messages, output_schema=DRILL_DRAFT_SCHEMA)
+                with usage_scope(stage="draft", repair_attempt=attempt + 1):
+                    draft = self.llm.chat_json(messages, output_schema=DRILL_DRAFT_SCHEMA)
             except Exception as exc:
                 raise WorkflowModelError(f"生成题目失败: {exc}") from exc
             try:
