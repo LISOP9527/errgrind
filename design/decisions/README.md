@@ -23,7 +23,7 @@ YYYY-MM-DD-short-title.md
 - [终端内容渲染边界](2026-07-27-terminal-content-rendering.md)：所有动态内容通过统一 UI 入口渲染，终端适配不污染标准 Markdown + LaTeX 数据。
 - [Drill 两阶段规格隔离](2026-07-28-drill-spec-isolation.md)：先从历史 Error 生成公共 DrillSpec，再由看不到原题的 Draft 出题；MVP 不引入多级自审。
 - [模型用量日志](2026-09-08-model-usage-logging.md)：记录各阶段服务端 token usage、修复与失败，先测量再优化。
-- [Codex OAuth 生成直连 Responses](2026-09-07-codex-direct-responses.md)：独立构造 Prompt 与原生消息，官方 SDK 保留登录、刷新和模型目录。
+- [Codex OAuth 生成直连 Responses](2026-09-07-codex-direct-responses.md)：生成与模型目录直连，隔离 Prompt；官方 SDK 仅保留登录与刷新。
 - [原 Codex app-server 接入决策](2026-08-29-codex-app-server-provider.md)：历史方案；生成和凭据读取边界已由直连决策替代。
 - [OCR 作为需人工校对的录题入口](2026-08-31-ocr-as-reviewed-input.md)：图片识别结果必须经人工编辑确认，数据库只保存确认后的文本。
 - [在录题字段内整合图片识别](2026-09-06-record-field-image-input.md)：三个字段独立添加图片，识别后编辑，最终只保存一条 Error。

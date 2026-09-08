@@ -11,6 +11,8 @@ ErrGrind 已能保存 Error 与 Grill/Teach 对话，但原记录无法说明来
 - `drill_attempts` 同时保存 provider/model 及未 format Judge 模板和 canonical Judge schema 的 SHA-256；旧 attempt 迁移为 `unknown`，不可与新版本直接合并比较。
 - 数据库使用 SQLite `user_version` 记录当前 Schema 版本；旧程序遇到更高版本时必须停止写入并提示升级。
 - Drill 正确和错误都记录为 Action 结果；取消、API 失败和非法判分不写结果。
+- Drill 结果的语义不等同于长期 Pattern 更新：post-Teach success 是当前 intervention context 下可执行正确 reasoning 的有限正向 Evidence，
+  post-Teach targeted failure 通常是更强的 mechanism persistence signal；两者都必须结合 provenance 和独立性解释，不使用固定 confidence weight 或数学化 Evidence score。
 - 删除 Error 时清除其子 Error 的结构化来源字段，并删除直接关联的 Drill ledger，明确表示来源已不可追溯。
 
 ## Rationale

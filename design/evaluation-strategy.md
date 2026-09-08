@@ -11,7 +11,9 @@ ErrGrind 的最终目标是减少未来 Error，但当前可观察到的信号�
 3. **行为迁移**：干预后，用户在新情境中更常表现出目标思维行为。
 4. **真实 Error 减少**：在可比的学习机会中，相关 Error 的发生率下降。
 
-`done` 数量只能说明流程完成；Drill 正确只能提供一次受控任务中的行为信号；未来 Error 再次出现可以反驳“已经解决”，但只有在存在学习机会分母时，才能估计 Error 发生率是否下降。
+`done` 数量只能说明流程完成。post-Teach Drill success 是有限的正向 Evidence，说明用户在当前 intervention context 下可以执行正确 reasoning，
+但不证明 failure mechanism 已消失；post-Teach targeted Drill failure 通常比即时 success 提供更强的 mechanism persistence signal，
+因为用户获得 correction opportunity 后仍出现相同 failure。未来 Error 再次出现可以反驳“已经解决”，但只有在存在学习机会分母时，才能估计 Error 发生率是否下降。
 
 ## 当前数据能回答什么
 
@@ -23,6 +25,9 @@ ErrGrind 的最终目标是减少未来 Error，但当前可观察到的信号�
 - Drill 答错后生成的新 Error 当前仍保留的 source 关联。
 
 这些字段不能单独证明两条记录来自独立学习事件，也不能证明 Pattern recurrence；Drill 统计还必须按 Judge provenance 分段，不能跨版本直接比较。
+
+评估 Drill 时应分别记录 `math_status` 与 `mechanism_evidence`。后者至少区分 `success_observed`、`failure_observed` 和 `insufficient`。
+`insufficient evidence` 不等于 mathematical failure：答案正确但解释过短、无法观察目标 reasoning 时，不能因此生成新的 Error。
 
 它们暂时不能回答：
 

@@ -39,9 +39,12 @@ Error → Grill → Teach → Drill → new Error / Evidence
 ```
 
 - Grill 是 active diagnosis：区分导致真实 Error 的竞争解释，不是 Socratic tutoring。
-- Teach 是 intervention：依据本次诊断帮助用户改变可能导致错误的思考机制。
-- Drill 是 targeted practice / controlled test，当前仍主要属于 intervention；可以产生真实的新 Error，
-  但不是 Teach 的即时考试，也不凭一次正确就证明机制已改变。
+- Teach 是 intervention：依据本次诊断帮助用户改变可能导致错误的思考机制。未来方向是 Socratic Teach，
+  可以通过提问帮助用户自行重建正确 reasoning，而不是默认直接给出完整解释；Socratic framing 只属于 Teach，
+  不属于 Grill。
+- Drill 是 targeted intervention + evidence-producing behavioral opportunity：既针对已诊断的 failure mechanism
+  提供练习和纠正机会，帮助用户调整 reasoning，也通过用户在任务中的真实行为产生新的 Evidence，观察目标机制是否仍影响行为。
+  它不是 Teach 的即时考试，也不凭一次正确就证明机制已改变。
 - 一次 episode diagnosis 不等于长期确认 Pattern；未来真实学习中的独立 Evidence 更重要。
 
 这条产品阶段方向不等于数据库状态枚举，也不要求每次操作线性执行。既有 Error 状态仍为
@@ -78,6 +81,8 @@ V1 的目标是“把 ErrGrind 最核心的 error-debugging loop 做到真正可
 - 保证 `supported` / `undetermined` 语义可靠；证据不足是有效结果，不强行产生 Pattern。
 - 保留 retrospective noisy Evidence 与当前理解的区别，不追问完整的干预后认知历史。
 - variant probe 只在竞争解释对行为有不同预测、确有诊断价值时使用；它属于 Grill，不进入普通 Drill ledger。
+  Grill variant 的目的是 diagnostic discrimination，用来区分 competing hypotheses；Drill 则用于诊断基本确定后的
+  targeted intervention + evidence generation。两者都可能生成新任务，但目的不同。
 - 控制问题数量、重复、leading 和用户负担；诊断是首要目标，允许 incidental learning effect，不能把学习效果当作诊断证明。
 
 沿用[主动诊断](decisions/2026-09-04-grill-as-active-diagnosis.md)、
@@ -87,19 +92,28 @@ V1 的目标是“把 ErrGrind 最核心的 error-debugging loop 做到真正可
 ### Teach
 
 Teach 要真正消费 Grill 的 episode diagnosis，针对 failure mechanism 设计干预，帮助用户理解并修正思考过程，
-避免退化成普通题目讲解。通过兼容摘要等方式消费诊断，不要求公开内部诊断账本；诊断不确定时，干预也应保留相应限制。
+避免退化成普通题目讲解。未来可采用 Socratic Teach，通过提问让用户自行重建正确 reasoning；这不改变 Grill 的诊断边界。
+通过兼容摘要等方式消费诊断，不要求公开内部诊断账本；诊断不确定时，干预也应保留相应限制。
 V1 保持 Grill / Teach 清晰的产品边界，无需提前统一成复杂 Action engine。
 
 ### Drill / Judge
 
-Drill 应越来越针对 failure mechanism，而不只是生成类似题。继续保持
+Drill 应越来越针对 failure mechanism，而不只是生成类似题。好的 Drill 保留目标 mechanism，降低无关计算和知识负担，
+减少其他 failure source 的干扰，避免多个机制同时成为主要解释，并改变 surface form 以避免用户只是记忆原题。
+其目标链条是 `target failure mechanism → clean behavioral opportunity → observable success/failure`。
+继续保持
 [DrillSpec → Draft → Judge 的信息隔离](decisions/2026-07-28-drill-spec-isolation.md)，
 通过真实样例和使用反馈改进质量，不为单题强保证恢复多级自审链。
 每次完成判分都保存 attempt；当前错误判分会派生新的 `pending-grill` Error，正确判分也保留记录。
 
-已知的 V1 Core polishing 任务是拆清 Judge 的“数学正确性”和“是否观察到目标 mechanism evidence”。
+已知的 V1 Core polishing 任务是拆清 Judge 的“数学正确性”和“是否观察到目标 mechanism evidence”。Judge 至少应区分
+`math_status`（mathematical correctness）与 `mechanism_evidence`（`success_observed`、`failure_observed`、
+`insufficient`）。`insufficient evidence` 不等于 mathematical failure：答案正确但解释过短、无法观察目标 reasoning 时，
+不能因此生成新的 Error。
 当前单一 `is_correct` boolean 也承载了作答过简、目标思路证据不足的情况；
-不能把“没观察到证据”直接解释成“真实发生了数学错误”。后续需一起评估判分呈现与派生 Error 的语义，
+不能把“没观察到证据”直接解释成“真实发生了数学错误”。post-Teach Drill success 是有限的正向 Evidence，说明用户在当前
+intervention context 下可以执行正确 reasoning，但不证明 failure mechanism 已消失；post-Teach targeted Drill failure
+通常提供更强的 mechanism persistence signal，因为用户获得 correction opportunity 后仍出现相同 failure。后续需一起评估判分呈现与派生 Error 的语义，
 但本文不决定最终字段、判分规则或迁移方案，也不改变当前运行行为。
 
 ### Input / reliability

@@ -9,7 +9,7 @@ ErrGrind 需要让模型只接收本次业务 Prompt 与对话。替换 app-serv
 Pi 的 [Codex transport](https://github.com/earendil-works/pi/blob/7d8ab31a477ecc07b36f56ffcae58c79307a68be/packages/ai/src/api/openai-codex-responses.ts)
 直接向 ChatGPT Codex Responses 后端发送调用方的 `instructions` 和 `input`，不运行
 Codex agent。本决策替代旧 app-server 决策中的生成路径和不读取登录文件的约束；
-保留官方 SDK 管理登录、刷新与模型目录。
+保留官方 SDK 管理登录与刷新；模型目录也改为直接请求后端。
 
 ## Decision
 
@@ -25,8 +25,15 @@ Codex agent。本决策替代旧 app-server 决策中的生成路径和不读取
 - OAuth 登录、凭据保存和刷新继续使用官方 SDK。生成时只读 `$CODEX_HOME/auth.json`
   （默认 `~/.codex/auth.json`）中的 access token 与 account id，不自行刷新、复制或
   写入凭据。接近到期时先由 SDK 刷新；HTTP 401 在没有输出时最多刷新并重试一次。
-- SDK 仅在登录、刷新或查询目录时延迟启动；有效凭据下纯生成不启动 app-server。
+- SDK 仅在登录与刷新时延迟启动；有效凭据下生成和模型目录查询均不启动 app-server。
   仅存储于钥匙串的凭据暂不支持直连，显示明确错误，不静默降级到 agent。
+- 模型目录直接 GET `/backend-api/codex/models?client_version=0.153.4`，每次访问后端，
+  不读取 SDK 的模型缓存。目录协议版本独立于认证 SDK，并固定为本次真实验证的版本；
+  不通过任意超大版本绕过过滤，未来升级需重新验证协议兼容性。
+- 目录只向 CLI 返回白名单元数据：模型 ID、显示名、可见性、默认选择与 reasoning effort。
+  按 `priority` 排序，首个可见模型作为目录默认；通常仅显示 `visibility=list`，
+  `include_hidden=True` 可查询其他项目。忽略 `base_instructions`、`model_messages` 等
+  指令字段，绝不拼入生成 Prompt。失败时保留手动输入模型 ID/effort 的现有入口。
 - 保留模型 ID、effort 与现有 CLI 入口。未设置 effort 时省略请求字段，使用后端默认，
   不再继承用户 Codex 配置中的默认生成参数。Codex 可选依赖增加 HTTPX SOCKS 支持，
   兼容已有代理环境，不修改用户代理设置。
@@ -50,3 +57,7 @@ HTTPX 是已有依赖，SSE 满足当前同步和流式接口，暂不引入 Web
   真实调用验证只使用合成输入，不读取业务数据库或发送历史错题。
 - 2026-09-07 最小真实直连验证返回 HTTP 200、`response.completed` 与符合严格 Schema 的
   `{"result":"DIRECT_OK"}`，没有创建 Codex thread。
+- 同日目录实测：缺少 `client_version` 时后端返回 400；`0.147.0` 返回的目录不含 Astra，
+  `0.153.4` 返回 `gpt-6-astra`，其 `minimal_client_version` 为 `0.153.0`。
+  原 SDK 目录缺失 Astra 的原因是版本过滤，不能仅归因为缓存；未来新模型也可能要求更新
+  目录协议版本。接口来源见 [官方 ModelsClient](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs)。

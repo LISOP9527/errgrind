@@ -1,5 +1,12 @@
 # 当前进度与验证记录
 
+## 2026-09-07：Codex 模型目录直连与 Astra 可见性
+
+- `models()` 改为直接 GET Codex 后端目录，有效凭据下不启动 SDK/app-server；保留可见性、优先级、默认模型与 effort 元数据，目录失败继续允许手动输入。
+- 根因实测：目录必须传 `client_version`；`0.147.0` 不返回 Astra，已验证的目录协议版本 `0.153.4` 返回 `gpt-6-astra`（最低 `0.153.0`）。目录协议版本与登录 SDK 分离，未来升级需重新验证。
+- 目录只提取白名单元数据，丢弃 `base_instructions`、`model_messages` 等字段，避免重新引入 Codex Prompt。401 刷新最多一次，瞬态失败有限重试。
+- 验证：真实 `/model` 查询路径已返回 Astra 及 low、medium、high、xhigh、max、ultra 六档 effort，测试时禁止 SDK 启动；完整离线回归 **186 项通过**，`git diff --check` 通过。
+
 ## 2026-09-07：Codex OAuth 生成直连 Responses
 
 - 参考 Pi 的请求协议，普通、流式、JSON、图片转录直接请求 Codex Responses；不创建 Codex thread，不附加 agent Prompt、AGENTS、技能、工具或环境上下文。历史保留原生角色，SQLite 仍是唯一会话事实来源。

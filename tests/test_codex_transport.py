@@ -4,6 +4,8 @@ import unittest
 import httpx
 
 from errgrind.llm.codex_transport import (
+    CODEX_CATALOG_CLIENT_VERSION,
+    CODEX_MODELS_URL,
     CODEX_RESPONSES_URL,
     CodexResponsesTransport,
     CodexTransportError,
@@ -159,6 +161,44 @@ class CodexTransportTests(unittest.TestCase):
         transport, _ = self.make(sse(tool))
         with self.assertRaises(CodexTransportError):
             list(transport.stream({}, "t", "a"))
+
+    def test_models_wire_and_validates_payload(self):
+        seen = {}
+        def handler(request):
+            seen["request"] = request
+            return httpx.Response(200, json={"models": [{"id": "gpt-5"}], "extra": True})
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        self.addCleanup(client.close)
+        transport = CodexResponsesTransport(client)
+        self.assertEqual(transport.models("token", "acct"), {"models": [{"id": "gpt-5"}], "extra": True})
+        request = seen["request"]
+        self.assertEqual(request.method, "GET")
+        self.assertEqual(str(request.url), CODEX_MODELS_URL + "?client_version=" + CODEX_CATALOG_CLIENT_VERSION)
+        self.assertEqual(request.headers["authorization"], "Bearer token")
+        self.assertEqual(request.headers["chatgpt-account-id"], "acct")
+        self.assertEqual(request.headers["originator"], "errgrind")
+        self.assertEqual(request.headers["accept"], "application/json")
+
+    def test_models_status_redirect_json_and_network_fail_safely(self):
+        for status, retryable in [(400, False), (401, False), (408, True), (429, True), (500, True), (302, False)]:
+            transport, _ = self.make("secret-body", status)
+            with self.assertRaises(CodexTransportError) as ctx:
+                transport.models("token-secret", "account-secret")
+            self.assertEqual(ctx.exception.status_code, status)
+            self.assertEqual(ctx.exception.retryable, retryable)
+            self.assertNotIn("secret", str(ctx.exception))
+        for payload in [{"model": []}, [], "bad"]:
+            transport, _ = self.make(json.dumps(payload), 200)
+            with self.assertRaises(CodexTransportError) as ctx:
+                transport.models("t", "a")
+            self.assertFalse(ctx.exception.retryable)
+        def broken(_request):
+            raise httpx.ReadTimeout("network-secret")
+        transport = CodexResponsesTransport(httpx.Client(transport=httpx.MockTransport(broken)))
+        with self.assertRaises(CodexTransportError) as ctx:
+            transport.models("token-secret", "account-secret")
+        self.assertTrue(ctx.exception.retryable)
+        self.assertNotIn("network-secret", str(ctx.exception))
 
 
 if __name__ == "__main__":

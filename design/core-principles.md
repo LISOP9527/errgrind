@@ -18,6 +18,11 @@ Policy 的价值，在于决定继续收集 Evidence，还是进行干预。
 
 Action 的价值，在于减少诊断不确定性或改变未来行为，并最终服务于减少未来 Error。
 
+Drill 同时是 targeted intervention 与 evidence-producing behavioral opportunity：它针对已诊断的 failure mechanism 提供
+练习和纠正机会，也通过用户在任务中的真实行为产生新的 Evidence。post-Teach Drill success 只说明用户在当前干预情境下
+能够执行正确 reasoning，是有限的正向 Evidence；它不证明 failure mechanism 已消失。post-Teach targeted Drill failure
+通常更强地提示 mechanism persistence，因为用户获得 correction opportunity 后仍出现相同 failure。两者都不能单独证明长期 Pattern 已改变。
+
 新 Evidence 必须能够更新或推翻 State。因此：
 
 > **ErrGrind 不是把一次 Error 直接归类为 Pattern，而是利用 Evidence 建立可更新的用户模型，并利用这个模型帮助用户减少未来的 Error。**

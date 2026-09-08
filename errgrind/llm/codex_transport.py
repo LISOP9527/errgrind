@@ -12,6 +12,10 @@ from .usage import record_http_status, record_usage
 
 
 CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
+# The backend requires a compatibility version and filters newer models by it.
+# This pins the directly tested catalog protocol, not the OAuth SDK version.
+CODEX_CATALOG_CLIENT_VERSION = "0.153.4"
 
 
 class CodexTransportError(Exception):
@@ -118,6 +122,45 @@ class CodexResponsesTransport:
             raise CodexTransportError("Codex 网络连接失败", retryable=True) from None
         except httpx.HTTPError:
             raise CodexTransportError("Codex HTTP 请求失败", retryable=False) from None
+
+    def models(self, access_token: str, account_id: str) -> dict:
+        """Fetch the Codex model catalog without following redirects."""
+        if self._closed:
+            raise CodexTransportError("Codex transport 已关闭", retryable=False)
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "chatgpt-account-id": account_id,
+            "originator": "errgrind",
+            "Accept": "application/json",
+        }
+        try:
+            response = self._client.get(
+                CODEX_MODELS_URL,
+                params={"client_version": CODEX_CATALOG_CLIENT_VERSION},
+                headers=headers,
+                follow_redirects=False,
+                timeout=httpx.Timeout(30.0, connect=20.0),
+            )
+            if response.status_code != 200:
+                retryable = response.status_code in {408, 429} or response.status_code >= 500
+                raise CodexTransportError(
+                    f"Codex 目录请求失败（HTTP {response.status_code}）",
+                    retryable=retryable,
+                    status_code=response.status_code,
+                )
+            try:
+                payload = response.json()
+            except (TypeError, ValueError):
+                raise CodexTransportError("Codex 目录响应格式无效", retryable=False) from None
+            if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+                raise CodexTransportError("Codex 目录响应格式无效", retryable=False)
+            return payload
+        except CodexTransportError:
+            raise
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+            raise CodexTransportError("Codex 目录网络连接失败", retryable=True) from None
+        except httpx.HTTPError:
+            raise CodexTransportError("Codex 目录 HTTP 请求失败", retryable=False) from None
 
     @staticmethod
     def _parse(lines: Iterator[str]) -> Iterator[str]:

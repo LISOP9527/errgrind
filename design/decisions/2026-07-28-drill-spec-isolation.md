@@ -5,12 +5,15 @@
 原来的单阶段 `/drill` 同时读取历史原题并生成新题，容易退化成修改数字、字母或背景的“原题换皮”。为解决这个问题，曾尝试在出题前加入 Guard、Review、Audit 等多级自审，但这使一次 Drill 需要更多模型调用、Prompt 和工程校验；同一个基础模型反复审查自己的收益也不稳定，不适合作为 MVP 基线。
 
 当前目标是先得到一个简单、可运行、可人工调 Prompt 的版本，不依赖更强模型、固定 Pattern 分类体系或题库。
+Drill 不是普通刷题或 Teach 的即时考试，而是 targeted intervention + evidence-producing behavioral opportunity。
 
 产品的质量目标是让生成题达到足够高的可接受概率，而不是保证每一道题都通过严格的语义审计。即使进入正式版，也不应为了追求单题强保证恢复多级模型审查链路。
 
 ## Decision
 
-`/drill` 的出题部分固定为两个阶段：
+`/drill` 的出题部分固定为两个阶段。DrillSpec 应保留目标 failure mechanism，同时降低无关计算和知识负担、减少其他 failure source
+的干扰、避免多个机制同时成为主要解释，并改变 surface form 以避免用户只是记忆原题；目标链条是
+`target failure mechanism -> clean behavioral opportunity -> observable success/failure`，而不是 surface similarity：
 
 1. **Spec：理解 Error 并生成 DrillSpec。** 本阶段读取最近 N 条 Error 的原题和 Grill 摘要，只选择一个 summary-derived mechanism，输出 `source_error_number`、`target_pattern`、`new_problem` 和 `difficulty`。`target_pattern` 包含 `success_signal`，用于描述“判断学生是否在本次干预中展示目标思考行为时，应观察到的信号”。因为只有本阶段看得到原题，所以“不要复述原题或只做表面改写”的要求只放在 Spec Prompt。
 2. **Draft：根据 DrillSpec 出题。** 本阶段只读取程序白名单重建后的 DrillSpec，看不到原题和完整 Grill 上下文，只输出 `question` 与 `reference_answer`。Draft Prompt 只描述如何落实规格，不再强调“禁止原题换皮”。
@@ -27,7 +30,9 @@ MVP 不再运行 Guard、Review、Audit，也不在质量检查失败后重做�
 - Spec 响应通过字段白名单重建，额外字段不会传给 Draft；
 - 程序阻止明显的原题特征文本进入公共 DrillSpec；
 - `success_signal` 同时传给 Draft 和 Judge；
-- Judge 的 `is_correct` 必须是 JSON 原生布尔值，`feedback` 必须是文本；
+- Judge 的 `is_correct` 必须是 JSON 原生布尔值，`feedback` 必须是文本；后续语义应区分 `math_status` 与
+  `mechanism_evidence`（`success_observed`、`failure_observed`、`insufficient`）。`insufficient evidence` 不等于数学失败，
+  不能仅因答案正确但解释过短而生成新的 Error；
 - 字段契约错误可在当前阶段做有限纠正，API 错误直接结束本次 Drill。
 
 两份可人工调优的 Prompt 分别保存在 `prompts/drill_spec.md` 和 `prompts/drill.md`。

@@ -19,7 +19,7 @@
 - [终端内容渲染边界](decisions/2026-07-27-terminal-content-rendering.md)：标准 Markdown + LaTeX 保持在数据层，终端统一在 UI 边界降级渲染。
 - [Drill 两阶段规格隔离](decisions/2026-07-28-drill-spec-isolation.md)：采用 Spec -> Draft 两阶段出题，保留原题信息边界和可人工调优的 Prompt。
 - [模型用量日志](decisions/2026-09-08-model-usage-logging.md)：记录各阶段服务端 token usage、修复与失败，先测量再优化。
-- [Codex OAuth 生成直连 Responses](decisions/2026-09-07-codex-direct-responses.md)：独立构造 Prompt 与原生消息，官方 SDK 保留登录、刷新和模型目录。
+- [Codex OAuth 生成直连 Responses](decisions/2026-09-07-codex-direct-responses.md)：生成与模型目录直连，隔离 Prompt；官方 SDK 仅保留登录与刷新。
 - [原 Codex app-server 接入决策](decisions/2026-08-29-codex-app-server-provider.md)：历史方案；生成和凭据读取边界已由直连决策替代。
 - [OCR 作为需人工校对的录题入口](decisions/2026-08-31-ocr-as-reviewed-input.md)：provider 负责图片转录，用户确认后的文本才进入现有 Error 工作流。
 - [在录题字段内整合图片识别](decisions/2026-09-06-record-field-image-input.md)：将选图和 OCR 整合进 `/record` 各字段，支持题目、思路与答案分离截图。

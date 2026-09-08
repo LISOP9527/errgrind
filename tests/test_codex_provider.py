@@ -217,18 +217,80 @@ class CodexProviderTests(unittest.TestCase):
             client.transcribe_image(str(image_path), "OCR")
         self.assertEqual(len(transport.calls), 1)
 
-    def test_auth_helpers_and_models_still_delegate_without_generation(self):
+    def test_auth_helpers_still_delegate_without_generation(self):
         sdk = Mock()
         client, transport = self.make(sdk=sdk)
         self.assertEqual(client.account(), sdk.account.return_value)
         self.assertEqual(client.login_chatgpt(), sdk.login_chatgpt.return_value)
         self.assertEqual(client.login_chatgpt_device_code(), sdk.login_chatgpt_device_code.return_value)
-        self.assertEqual(client.models(), sdk.models.return_value)
         self.assertEqual(transport.calls, [])
         client.close()
         client.close()
         sdk.close.assert_called_once()
         self.assertTrue(transport.closed)
+
+    def test_models_are_live_filtered_sorted_and_never_supply_prompts(self):
+        client, transport = self.make()
+        transport.models = Mock(return_value={"models": [
+            {"slug": "older", "visibility": "list", "priority": 5},
+            {"slug": "hidden", "visibility": "hide", "priority": -1},
+            {"slug": "gpt-6-astra", "visibility": "list", "priority": 0,
+             "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}, {"effort": "low"}],
+             "default_reasoning_level": "low", "base_instructions": "SECRET_CODEX_PROMPT",
+             "model_messages": {"instructions": "SECRET_CODEX_PROMPT"}},
+            {"slug": "older", "visibility": "list", "priority": 6},
+            {"slug": "", "visibility": "list"}, None,
+        ]})
+        with patch("errgrind.llm.codex._load_sdk") as sdk:
+            entries = client.models()
+            hidden = client.models(include_hidden=True)
+            client.chat([{"role": "system", "content": "ErrGrind only"}])
+        sdk.assert_not_called()
+        self.assertEqual([m["model"] for m in entries], ["gpt-6-astra", "older"])
+        self.assertEqual([m["model"] for m in hidden], ["hidden", "gpt-6-astra", "older"])
+        self.assertEqual([m["model"] for m in hidden if m["is_default"]], ["gpt-6-astra"])
+        self.assertEqual(entries[0]["supported_reasoning_efforts"], ["low", "ultra"])
+        self.assertEqual(entries[0]["default_reasoning_effort"], "low")
+        self.assertNotIn("SECRET_CODEX_PROMPT", json.dumps(entries + hidden + transport.calls))
+        self.assertEqual(transport.calls[0][0]["instructions"], "ErrGrind only")
+        self.assertEqual(transport.models.call_count, 2)
+
+    def test_model_catalog_refresh_retry_and_permanent_failure(self):
+        unauthorized = CodexTransportError("expired", status_code=401, retryable=False)
+        transient = CodexTransportError("busy", status_code=503, retryable=True)
+        client, transport = self.make()
+        transport.models = Mock(side_effect=[unauthorized, transient, {"models": []}])
+        client._sdk = Mock()
+        def refresh(**_):
+            client._auth_file.write_text(json.dumps({"tokens": {"access_token": "new", "account_id": "account"}}))
+        client._sdk.account.side_effect = refresh
+        with patch("errgrind.llm.codex.time.sleep") as sleep:
+            self.assertEqual(client.models(), [])
+        self.assertEqual(transport.models.call_count, 3)
+        self.assertEqual(transport.models.call_args.args, ("new", "account"))
+        client._sdk.account.assert_called_once_with(refresh_token=True)
+        client._sdk.models.assert_not_called()
+        sleep.assert_called_once()
+
+        for errors in ([unauthorized, unauthorized], [CodexTransportError("bad", status_code=400, retryable=False)]):
+            client, transport = self.make(sdk=Mock())
+            transport.models = Mock(side_effect=errors)
+            with self.assertRaises(CodexError):
+                client.models()
+            self.assertEqual(transport.models.call_count, len(errors))
+
+    def test_direct_catalog_reaches_cli_and_effort_picker(self):
+        client, transport = self.make()
+        transport.models = Mock(return_value={"models": [
+            {"slug": "gpt-6-astra", "visibility": "list", "priority": 0,
+             "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}],
+             "default_reasoning_level": "low"},
+        ]})
+        with patch.object(app, "_CODEX_MODEL_METADATA", {}), patch.object(app, "CodexClient", return_value=client):
+            self.assertEqual(app._fetch_codex_models(), (["gpt-6-astra"], "gpt-6-astra"))
+            self.assertEqual(app._fetch_codex_model_metadata("gpt-6-astra"), {
+                "supported_reasoning_efforts": ["low", "high"], "default_reasoning_effort": "low",
+            })
 
     def test_app_wiring_does_not_require_api_key(self):
         class FakeClient:

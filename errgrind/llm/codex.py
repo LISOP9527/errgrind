@@ -1,4 +1,4 @@
-"""Codex OAuth generation over HTTP; the SDK only manages login and models.
+"""Codex OAuth generation and model discovery over HTTP.
 
 Requests contain ErrGrind instructions and native conversation messages. No
 Codex thread is created, so its agent prompt, AGENTS and tools cannot enter the
@@ -41,7 +41,7 @@ def _load_sdk() -> tuple[Any, Any]:
 
 
 class CodexClient:
-    """Stateless model calls with SDK-owned OAuth login and refresh."""
+    """Direct model calls/catalog with SDK-owned OAuth login and refresh."""
 
     def __init__(
         self, model: str = "gpt-5.6-sol", max_retries: int = 3,
@@ -173,11 +173,7 @@ class CodexClient:
         if self._closed:
             raise CodexError("Codex 客户端已关闭")
         body = self._body(messages, **kwargs)
-        if self._transport is None:
-            try:
-                self._transport = CodexResponsesTransport()
-            except Exception:
-                raise CodexError("无法创建 Codex HTTP 客户端，请检查代理配置和依赖") from None
+        transport = self._http()
         credentials = self._credentials()
         refreshed = False
         attempt = 0
@@ -190,7 +186,7 @@ class CodexClient:
                     model=body.get("model", self.model),
                     reasoning_effort=effort if isinstance(effort, str) else None,
                 ):
-                    with closing(self._transport.stream(body, *credentials)) as stream:
+                    with closing(transport.stream(body, *credentials)) as stream:
                         for token in stream:
                             collected.append(token)
                             if on_token is not None:
@@ -209,6 +205,16 @@ class CodexClient:
                 if not exc.retryable or attempt >= self.max_retries:
                     raise CodexError(str(exc)) from None
                 time.sleep(2 ** (attempt - 1))
+
+    def _http(self) -> Any:
+        if self._closed:
+            raise CodexError("Codex 客户端已关闭")
+        if self._transport is None:
+            try:
+                self._transport = CodexResponsesTransport()
+            except Exception:
+                raise CodexError("无法创建 Codex HTTP 客户端，请检查代理配置和依赖") from None
+        return self._transport
 
     def chat(self, messages: list[dict], **kwargs: Any) -> str:
         return self._generate(messages, **kwargs)
@@ -271,5 +277,60 @@ class CodexClient:
     def login_chatgpt_device_code(self) -> Any:
         return self._control().login_chatgpt_device_code()
 
-    def models(self, *, include_hidden: bool = False) -> Any:
-        return self._control().models(include_hidden=include_hidden)
+    def models(self, *, include_hidden: bool = False) -> list[dict[str, Any]]:
+        """Fetch current OAuth model metadata without loading the agent runtime."""
+        transport = self._http()
+        credentials = self._credentials()
+        refreshed = False
+        attempt = 0
+        while True:
+            try:
+                payload = transport.models(*credentials)
+                return self._model_entries(payload["models"], include_hidden=include_hidden)
+            except CodexTransportError as exc:
+                if exc.status_code == 401 and not refreshed:
+                    credentials = self._credentials(refresh=True)
+                    refreshed = True
+                    continue
+                attempt += 1
+                if not exc.retryable or attempt >= self.max_retries:
+                    raise CodexError(str(exc)) from None
+                time.sleep(2 ** (attempt - 1))
+
+    @staticmethod
+    def _model_entries(models: list, *, include_hidden: bool) -> list[dict[str, Any]]:
+        def priority(item: dict) -> float:
+            value = item.get("priority")
+            return value if type(value) in (int, float) else float("inf")
+
+        result = []
+        seen = set()
+        default_chosen = False
+        for item in sorted((item for item in models if isinstance(item, dict)), key=priority):
+            model = item.get("slug")
+            if not isinstance(model, str) or not model.strip() or model in seen:
+                continue
+            hidden = item.get("visibility") != "list"
+            if hidden and not include_hidden:
+                continue
+            seen.add(model)
+            is_default = not hidden and not default_chosen
+            default_chosen = default_chosen or is_default
+            levels = item.get("supported_reasoning_levels")
+            efforts = []
+            for level in levels if isinstance(levels, list) else []:
+                effort = level.get("effort") if isinstance(level, dict) else None
+                if isinstance(effort, str) and effort and effort not in efforts:
+                    efforts.append(effort)
+            default_effort = item.get("default_reasoning_level")
+            # Explicit allowlist: catalog base_instructions/model_messages
+            # must never enter prompts, public metadata, or persisted config.
+            result.append({
+                "model": model,
+                "display_name": item.get("display_name") if isinstance(item.get("display_name"), str) else model,
+                "hidden": hidden,
+                "is_default": is_default,
+                "supported_reasoning_efforts": efforts,
+                "default_reasoning_effort": default_effort if isinstance(default_effort, str) else None,
+            })
+        return result
