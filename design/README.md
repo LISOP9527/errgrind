@@ -14,6 +14,8 @@
 
 ## 决策记录
 
+- [Drill 目标查询与判题结果展示](decisions/2026-09-08-drill-target-query-and-verdict.md)：按需查询历史题目的目标机制，判题后仅展示对错。
+- [Drill 答题图片输入](decisions/2026-09-08-drill-answer-ocr.md)：答案图片转录后追加到可编辑草稿，确认后才判分。
 - [决策索引](decisions/README.md)：记录已经做出的设计决策、原因和影响。
 - [Grill 与 Teach 会话生命周期](decisions/2026-07-27-conversation-lifecycle.md)：完成的 Grill 只读，Teach 持续追加。
 - [终端内容渲染边界](decisions/2026-07-27-terminal-content-rendering.md)：标准 Markdown + LaTeX 保持在数据层，终端统一在 UI 边界降级渲染。

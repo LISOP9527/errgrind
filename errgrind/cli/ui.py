@@ -744,52 +744,81 @@ def popup_content(body, title="", footer=""):
     app.run()
 
 
-def popup_drill_answer(question_text):
-    text_area = TextArea(multiline=True, wrap_lines=True)
-    kb = KeyBindings()
+def popup_drill_answer(
+    question_text: str,
+    image_loader: Callable[[], str | None] | None = None,
+) -> str | None:
+    """Collect and review a Drill answer, optionally appending image OCR drafts."""
+    draft = ""
+    while True:
+        text_area = TextArea(text=draft, multiline=True, wrap_lines=True)
+        text_area.buffer.cursor_position = len(draft)
+        kb = KeyBindings()
 
-    @kb.add("escape", "enter")
-    def _(event):
-        text_area.buffer.insert_text("\n")
+        if image_loader is not None:
+            @kb.add("f2")
+            @kb.add("c-o")
+            def _(event):
+                event.app.exit(result=("image", text_area.text))
 
-    @kb.add("enter")
-    def _(event):
-        event.app.exit(result=text_area.text)
+        @kb.add("escape", "enter")
+        def _(event):
+            text_area.buffer.insert_text("\n")
 
-    @kb.add("escape")
-    def _(event):
-        event.app.exit(result=None)
+        @kb.add("enter")
+        def _(event):
+            event.app.exit(result=text_area.text)
 
-    content_lines = [
-        ("class:title", "🎯 综合演练 - 答题\n\n"),
-    ]
-    content_lines.extend(render_markdown_to_formatted_text(question_text))
-    content_lines.append(("", "\n\n"))
-    content_lines.append(("class:user-input", "输入你的答案与解题思路（Alt+Enter 换行，Enter 提交）：\n"))
+        @kb.add("escape")
+        def _(event):
+            event.app.exit(result=None)
 
-    question_window = Window(
-        content=FormattedTextControl(content_lines),
-        dont_extend_height=True,
-        wrap_lines=True,
-    )
+        @kb.add("c-c")
+        def _(event):
+            event.app.exit(result=None)
 
-    layout = HSplit([
-        question_window,
-        Window(height=1, content=FormattedTextControl([("class:dim", "─" * 60)])),
-        Window(text_area.control, height=Dimension(min=5, max=15)),
-        Window(height=1, content=FormattedTextControl([("class:footer", "Alt+Enter 换行  │  Enter 提交  │  Esc 取消")])),
-    ])
-
-    frame = Frame(layout, title="Drill 答题面板")
-    container = Box(frame, padding=1)
-
-    app = Application(
-        layout=Layout(container),
-        key_bindings=kb,
-        style=GLOBAL_STYLE,
-        full_screen=True,
-    )
-    return app.run()
+        content_lines = [("class:title", "🎯 综合演练 - 答题\n\n")]
+        content_lines.extend(render_markdown_to_formatted_text(question_text))
+        content_lines.append(("", "\n\n"))
+        content_lines.append(("class:user-input", "输入你的答案与解题思路（Alt+Enter 换行，Enter 提交）：\n"))
+        question_window = Window(
+            content=FormattedTextControl(content_lines),
+            dont_extend_height=True,
+            wrap_lines=True,
+        )
+        footer = "Alt+Enter 换行  │  Enter 提交  │  Esc 取消"
+        if image_loader is not None:
+            footer = "F2 / Ctrl+O 添加图片  │  " + footer
+        layout = HSplit([
+            question_window,
+            Window(height=1, content=FormattedTextControl([("class:dim", "─" * 60)])),
+            Window(text_area.control, height=Dimension(min=5, max=15)),
+            Window(
+                content=FormattedTextControl([("class:footer", footer)]),
+                align="center",
+                wrap_lines=True,
+                dont_extend_height=True,
+            ),
+        ])
+        frame = Frame(layout, title="Drill 答题面板")
+        container = Box(frame, padding=1)
+        app = Application(
+            layout=Layout(container), key_bindings=kb, style=GLOBAL_STYLE, full_screen=True
+        )
+        try:
+            result = app.run()
+        except (KeyboardInterrupt, EOFError):
+            return None
+        if not (isinstance(result, tuple) and result and result[0] == "image"):
+            return result
+        draft = result[1]
+        assert image_loader is not None
+        try:
+            extracted = image_loader()
+        except (KeyboardInterrupt, EOFError):
+            continue
+        if extracted:
+            draft = f"{draft}\n{extracted}" if draft else extracted
 
 
 def popup_confirm(body):

@@ -65,8 +65,10 @@ Drill attempt 数据库 ID。直接调用 provider 且没有业务 scope 时标�
   不能再加到 total 上。
 - OpenAI 兼容接口从 `usage` 读取，包括 `prompt_tokens_details.cached_tokens`、
   `completion_tokens_details.reasoning_tokens`，兼容 DeepSeek 的
-  `prompt_cache_hit_tokens`。流式调用请求 `stream_options.include_usage=true`，接收无正文的
-  usage chunk；不为获取 usage 额外调用模型或重新生成。兼容端是否返回这些字段取决于服务端。
+  `prompt_cache_hit_tokens`。流式调用**不为 telemetry 自动加入 `stream_options` 或其它扩展字段**；
+  provider 若自然返回 usage 就记录，否则保持 unknown。显式由调用方传入的 `stream_options`
+  原样保留。DeepSeek 当前文档明确说明即使不设置 `include_usage`，最后一个流式 chunk 仍包含
+  整次请求的 usage；其它 OpenAI-compatible 端点不据此推断支持相同扩展。
 - Gemini 从 `usageMetadata` 读取。`output_tokens` 保留 `candidatesTokenCount`，
   `reasoning_tokens` 保留 `thoughtsTokenCount`；Gemini 的候选输出不包含单独报告的推理字段，
   与 Codex/OpenAI 的输出口径不同。总量直接使用 `totalTokenCount`，不自行重算。
@@ -81,6 +83,7 @@ Drill attempt 数据库 ID。直接调用 provider 且没有业务 scope 时标�
   `missing_usage_attempts` 标明完全没有用量的请求。不能将其视为完整账单或费用。
 
 字段口径参考：[Gemini UsageMetadata](https://ai.google.dev/api/generate-content#UsageMetadata)、
+[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)、
 [DeepSeek 缓存字段](https://api-docs.deepseek.com/guides/kv_cache/)。
 Codex/OpenAI 字段映射由离线 SSE/SDK 响应 fixture 验证。
 

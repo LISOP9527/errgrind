@@ -103,10 +103,11 @@ class LLMClient:
                     reasoning_effort=kwargs.get("reasoning_effort"),
                     sdk_max_retries=getattr(self.client, "max_retries", None),
                 ) as usage:
+                    # Telemetry must not change the wire protocol of an otherwise
+                    # compatible provider. Record usage if the provider emits it
+                    # naturally; missing stream usage remains unknown. Explicit
+                    # caller-supplied stream_options are preserved unchanged.
                     stream_kwargs = dict(kwargs)
-                    stream_options = dict(stream_kwargs.get("stream_options") or {})
-                    stream_options["include_usage"] = True
-                    stream_kwargs["stream_options"] = stream_options
                     response = self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
