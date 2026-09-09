@@ -34,7 +34,7 @@ def _load_sdk() -> tuple[Any, Any]:
         from openai_codex import Codex, CodexConfig
     except ImportError as exc:
         raise CodexError(
-            "Codex 登录和模型目录需要官方 openai-codex SDK；"
+            "Codex 登录和凭据刷新需要官方 openai-codex SDK；"
             "请在项目目录重新运行 bash install.sh。"
         ) from exc
     return Codex, CodexConfig
