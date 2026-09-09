@@ -43,6 +43,7 @@ def _credentials(html, action=None):
 
 try:
     import flask  # noqa: F401
+    import mdit_py_plugins  # noqa: F401
 except ImportError:  # The optional web extra is not installed in core CI.
     flask = None
 if flask is not None:
@@ -322,7 +323,7 @@ class WebApplicationTests(unittest.TestCase):
 
     def test_busy_guard_rejects_second_model_request(self):
         error_id = self.db.create_error("求 x", "我直接套了公式")
-        other_id = self.db.create_error("求 y", "我直接套了公式")
+        other_id = error_id
         entered, release = threading.Event(), threading.Event()
         self.llm.block = (entered, release)
         clients = [self.web.test_client(), self.web.test_client()]
@@ -352,12 +353,16 @@ class WebApplicationTests(unittest.TestCase):
         prep = self.client.post(f'/api/drill/{key}/prepare', data={'csrf': csrf, 'submit_token': token}, headers={'Accept':'application/json'})
         page = self.client.get(f'/drill/{key}').data
         csrf, judge_token = _credentials(page, f'/api/drill/{key}/judge')
+        stale_page = self.client.get(f'/drill/{key}').data
+        _, stale_token = _credentials(stale_page, f'/api/drill/{key}/judge')
         judged = self.client.post(f'/api/drill/{key}/judge', data={'csrf': csrf, 'submit_token': judge_token, 'answer':'正确'}, headers={'Accept':'application/json'})
         self.assertEqual(judged.status_code, 200)
         self.assertEqual(self.db.drill_stats()['total'], 1)
         self.assertEqual(len(self.db.list_all_errors()), 1)
         replay = self.client.post(f'/api/drill/{key}/judge', data={'csrf': csrf, 'submit_token': judge_token, 'answer':'正确'}, headers={'Accept':'application/json'})
         self.assertEqual(replay.status_code, 409)
+        cached = self.client.post(f'/api/drill/{key}/judge', data={'csrf': csrf, 'submit_token': stale_token, 'answer':'正确'}, headers={'Accept':'application/json'})
+        self.assertEqual(cached.status_code, 200)
         self.assertEqual(self.db.drill_stats()['total'], 1)
 
 

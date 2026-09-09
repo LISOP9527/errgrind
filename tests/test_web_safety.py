@@ -2,6 +2,7 @@
 import io
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -123,3 +124,53 @@ class WebRecoveryTests(unittest.TestCase):
             self.assertNotIn('<svg ', rendered)
         self.assertNotIn('data-tex', render_markdown('`$x$`\n\n```tex\n$$y$$\n```'))
         self.assertNotIn('href="javascript:', render_markdown('[click](javascript:alert(1))'))
+
+    def test_prepare_reports_real_spec_and_draft_stages(self):
+        self.db.update_grilling(self.error_id, "[]", "诊断总结")
+        page = self.client.get('/drill', follow_redirects=True)
+        form = _form(page.data)
+        action = form['action']
+        key = action.split('/')[3]
+        entered_spec, entered_draft = threading.Event(), threading.Event()
+        release_spec, release_draft = threading.Event(), threading.Event()
+        original = self.llm.chat_json
+        results = []
+        def blocked(*args, **kwargs):
+            required = kwargs['output_schema']['required']
+            if 'source_error_number' in required:
+                entered_spec.set()
+                if not release_spec.wait(5): raise RuntimeError('test timeout')
+            elif set(required) == {'question', 'reference_answer'}:
+                entered_draft.set()
+                if not release_draft.wait(5): raise RuntimeError('test timeout')
+            return original(*args, **kwargs)
+        client = self.app.test_client()
+        client.set_cookie('session', self.client.get_cookie('session').value)
+        def request_prepare():
+            results.append(client.post(action, data=form['values'], headers={'Accept': 'application/json'}))
+        with patch.object(self.llm, 'chat_json', side_effect=blocked):
+            thread = threading.Thread(target=request_prepare)
+            thread.start()
+            try:
+                self.assertTrue(entered_spec.wait(3))
+                status = self.client.get(f'/api/drill/{key}').get_json()
+                self.assertEqual(status, {'stage': 'spec'})
+                release_spec.set()
+                self.assertTrue(entered_draft.wait(3))
+                status = self.client.get(f'/api/drill/{key}').get_json()
+                self.assertEqual(status, {'stage': 'draft'})
+            finally:
+                release_spec.set(); release_draft.set(); thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0].status_code, 200)
+        self.assertNotIn(b'REFERENCE_ONLY', results[0].data)
+
+    def test_missing_config_still_allows_text_recording(self):
+        app = create_app(db_path=self.path, cfg={}, secret_key='no-model')
+        client = app.test_client()
+        page = client.get('/record')
+        self.assertIn('尚未配置可用模型'.encode(), page.data)
+        form = _form(page.data)
+        response = client.post('/record', data=dict(form['values'], question='题目', user_thoughts='没有思路'))
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(len(self.db.list_all_errors()), 2)

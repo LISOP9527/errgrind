@@ -85,7 +85,16 @@ document.querySelectorAll('form[data-action]').forEach(form => {
       const {response, result} = await send(form.action, data);
       if (result.submit_token) form.elements.submit_token.value = result.submit_token;
       if (!response.ok) { showError(result.error); return; }
-      if (result.redirect) location.assign(result.redirect);
+      if (result.redirect) {
+        const target = new URL(result.redirect, location.href);
+        // An anchor-only navigation does not fetch the updated conversation.
+        if (target.pathname === location.pathname && target.search === location.search) {
+          history.replaceState(null, '', target.href);
+          location.reload();
+        } else {
+          location.assign(target.href);
+        }
+      }
     } catch (error) {
       showError(error.message || '请求中断，请保留输入并查看记录。');
     } finally {
