@@ -1,5 +1,14 @@
 # 当前进度与验证记录
 
+## 2026-09-09：本机 thin WebUI
+
+- 新增可选 `web` extra：Flask/Jinja、Waitress 单进程线程服务、vanilla fetch；`python -m errgrind.web` 默认监听 `127.0.0.1:8765`。
+- Error list/detail、三个字段文字与上传 OCR 校对、Grill start/answer/pause/resume、Teach start/reply/finish、Drill spec/draft/Judge 与错误派生跳转均通过 application。新增 `record_error` 校验、来源与 public 返回，CLI 复用。
+- HTML 只显示公开内容；Markdown 与 KaTeX 资源本地提供，禁用 raw HTML 与可信 TeX 扩展。POST 使用 CSRF、一次性服务端 token 与进程内互斥；等待显示秒数及真实 Drill stage，失败保留草稿/已保存对话。
+- 验证：集成最新 main 后完整离线回归 **249 项通过**；覆盖 provider/contract/persistence 错误映射、OCR 临时文件清理、Grill/Teach 回答失败后恢复、并发与重复 Judge、隐藏诊断/答案隔离及数学 HTML 转义。
+- 浏览器 smoke：Chromium + 临时 SQLite + synthetic fake LLM，完成上传 OCR → 人工校对 Record → Grill 暂停/恢复/完成 → Teach 回复/结束 → Drill spec/draft → Judge → 新 Error；390×844 手机尺寸与 1280×900 桌面检查通过，公式正常、无横向页面溢出或脚本错误。未调用真实模型，未读取正式业务数据库。
+- 限制：无账号系统，仅支持单进程；未判分 Drill 准备结果限当前进程。使用与安全说明见 [README](README.md)，不包含 provider compatibility、V2 或 Judge schema 改造。
+
 ## 2026-09-08：Drill 目标查询与简洁判题结果
 
 - 新增 `/drills` 历史选择与 `/drills <ID>` 直接查询，展示已判分题目和五项目标机制字段；不限最近 20 条，缺失字段显示“未记录”。
