@@ -60,6 +60,20 @@ class ProviderUsageTests(unittest.TestCase):
         self.assertNotIn("stream_options", create.call_args.kwargs)
         self.assertEqual(_rows(self.log)[0]["total_tokens"], 5)
 
+    def test_opencode_stream_does_not_inject_telemetry_options(self):
+        client = object.__new__(LLMClient)
+        client.model, client.max_retries, client.provider = "model-x", 1, "opencode"
+        create = Mock(return_value=iter([
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="ok"))], usage=None),
+        ]))
+        client.client = SimpleNamespace(max_retries=0, chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+        self.assertEqual(client.stream_chat([], lambda _: None), "ok")
+        self.assertNotIn("stream_options", create.call_args.kwargs)
+        row = _rows(self.log)[0]
+        self.assertFalse(row["usage_reported"])
+        self.assertIsNone(row["total_tokens"])
+
     def test_openai_stream_preserves_explicit_options_and_missing_usage_is_unknown(self):
         client = object.__new__(LLMClient)
         client.model, client.max_retries, client.provider = "model-x", 1, "openai_compatible"
