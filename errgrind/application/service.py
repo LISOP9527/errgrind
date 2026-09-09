@@ -14,6 +14,7 @@ from .contracts import (
     WorkflowModelError,
     public_error,
 )
+from ..models.types import DrillAttemptView
 from .drill import DrillWorkflow
 from .grill import GrillWorkflow
 from .teach import TeachWorkflow
@@ -40,15 +41,17 @@ class ErrGrindApplication:
     def delete_error(self, error_id: int) -> None:
         self.db.delete_error(error_id)
 
-    @usage_action("record", "ocr_field")
-    def transcribe_record_field(self, image_path: str, field: str) -> str:
-        """Return an unpersisted OCR draft for one field, for human review."""
+    def _transcribe_image_field(
+        self, image_path: str, field: str, *, action: str = "record"
+    ) -> str:
+        """Transcribe one image into an editable, unpersisted draft."""
         from ..llm.ocr import OcrError
 
         fields = {
             "question": "题目",
             "user_thoughts": "用户当时的思路或作答",
             "reference_answer": "参考答案",
+            "drill_answer": "当前 Drill 的答案与解题思路",
         }
         if field not in fields:
             raise OutputContractError("不支持的录题字段")
@@ -57,7 +60,7 @@ class ErrGrindApplication:
             raise WorkflowModelError("当前 AI provider 不支持字段图片识别，请切换 provider")
         try:
             prompt = self.prompts.load("ocr_field.md").format(field=fields[field])
-            with usage_scope(stage="ocr_" + field):
+            with usage_scope(action=action, stage="ocr_" + field):
                 result = transcribe(image_path, prompt)
         except (KeyboardInterrupt, EOFError):
             raise
@@ -69,6 +72,18 @@ class ErrGrindApplication:
         if not isinstance(result, str) or not result.strip():
             raise OutputContractError("没有识别出当前字段的文字，请换一张图片或手动输入")
         return result.strip()
+
+    @usage_action("record", "ocr_field")
+    def transcribe_record_field(self, image_path: str, field: str) -> str:
+        """Return an unpersisted OCR draft for one record field."""
+        if field not in {"question", "user_thoughts", "reference_answer"}:
+            raise OutputContractError("不支持的录题字段")
+        return self._transcribe_image_field(image_path, field, action="record")
+
+    @usage_action("drill", "ocr_answer")
+    def transcribe_drill_answer(self, image_path: str) -> str:
+        """Return an editable OCR draft for the user's current Drill answer."""
+        return self._transcribe_image_field(image_path, "drill_answer", action="drill")
 
     def start_or_resume_grill(
         self,
@@ -131,3 +146,35 @@ class ErrGrindApplication:
         return DrillWorkflow(
             self.db, self.llm, self.prompts, self.cfg
         ).judge_and_record(preparation, user_response)
+
+    def list_drill_history(self) -> list[DrillAttemptView]:
+        """Return only the question and target mechanism for every judged Drill."""
+        return [
+            self._public_drill_attempt(attempt)
+            for attempt in self.db.list_drill_attempts(limit=None)
+        ]
+
+    def get_drill_history(self, attempt_id: int) -> DrillAttemptView | None:
+        """Read one judged Drill without invoking the model or changing the DB."""
+        attempt = self.db.get_drill_attempt(attempt_id)
+        return self._public_drill_attempt(attempt) if attempt is not None else None
+
+    @staticmethod
+    def _public_drill_attempt(attempt) -> DrillAttemptView:
+        target = (
+            attempt.drill_spec.get("target_pattern")
+            if isinstance(attempt.drill_spec, dict) else None
+        )
+        keys = ("mechanism", "trigger", "failure_behavior", "desired_behavior", "success_signal")
+        if not isinstance(target, dict):
+            target = {}
+        return DrillAttemptView(
+            attempt_id=attempt.id,
+            question=attempt.question,
+            target_pattern={
+                key: target[key].strip()
+                if isinstance(target.get(key), str) and target[key].strip()
+                else "未记录"
+                for key in keys
+            },
+        )

@@ -45,6 +45,15 @@ class DrillAttemptResult:
     derived_error_id: Optional[int]
 
 
+@dataclass(frozen=True)
+class DrillAttemptView:
+    """最小的、可供前端查看已判分 Drill 历史的公开结果。"""
+
+    attempt_id: int
+    question: str
+    target_pattern: dict[str, str]
+
+
 @dataclass
 class DrillContext:
     error_id: int

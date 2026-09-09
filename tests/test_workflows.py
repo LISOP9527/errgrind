@@ -3,6 +3,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from errgrind.application import ErrGrindApplication
 from errgrind.application.grill_diagnosis import empty_diagnostic_state, load_diagnostic_state
 from errgrind.cli.commands import (
     _cmd_drill,
+    _cmd_drills,
     _cmd_ocr,
     _cmd_record,
     _run_grilling,
@@ -580,6 +582,215 @@ class DrillWorkflowTests(unittest.TestCase):
             _cmd_drill(state, "")
         return answer_popup, result_popup, error_message
 
+    def test_drill_history_is_unbounded_and_hides_judge_fields(self):
+        spec = {"target_pattern": {
+            "mechanism": "机制", "trigger": "触发", "failure_behavior": "失败",
+            "desired_behavior": "期望", "success_signal": "成功",
+        }}
+        for index in range(21):
+            self.db.record_drill_attempt(
+                self.source_error_id, spec, f"历史题目 {index}", "答案", "作答",
+                True, "内部反馈",
+            )
+        app = ErrGrindApplication(self.db, object(), PromptManager())
+        before = self.db.drill_stats()
+        entries = app.list_drill_history()
+        self.assertEqual(len(entries), 21)
+        self.assertEqual(entries[0].question, "历史题目 20")
+        self.assertEqual(entries[0].target_pattern["mechanism"], "机制")
+        self.assertFalse(hasattr(entries[0], "feedback"))
+        self.assertEqual(self.db.drill_stats(), before)
+        self.assertEqual(app.get_drill_history(entries[-1].attempt_id).question, "历史题目 0")
+
+    def test_drill_history_missing_target_fields_is_readable(self):
+        result = self.db.record_drill_attempt(
+            self.source_error_id, {"target_pattern": {"mechanism": "仅有机制"}},
+            "旧题", "答案", "作答", True, "反馈",
+        )
+        entry = ErrGrindApplication(self.db, object(), PromptManager()).get_drill_history(result.attempt_id)
+        self.assertEqual(entry.target_pattern["mechanism"], "仅有机制")
+        self.assertEqual(entry.target_pattern["success_signal"], "未记录")
+
+    def test_drills_command_direct_id_only_renders_public_fields(self):
+        entry = SimpleNamespace(
+            attempt_id=7, question="题目", target_pattern={
+                "mechanism": "机制", "trigger": "触发", "failure_behavior": "失败",
+                "desired_behavior": "期望", "success_signal": "成功",
+            },
+        )
+        class DrillHistoryApp:
+            def get_drill_history(self, attempt_id):
+                self.seen_id = attempt_id
+                return entry
+        app = DrillHistoryApp()
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        state.application = lambda: app
+        with patch("errgrind.cli.commands.popup_content") as popup:
+            _cmd_drills(state, "7")
+        rendered = "".join(
+            part[1] if isinstance(part, tuple) and len(part) > 1 else str(part)
+            for part in popup.call_args.args[0]
+        )
+        self.assertIn("题目", rendered)
+        self.assertIn("机制", rendered)
+        self.assertNotIn("反馈", rendered)
+        self.assertEqual(app.seen_id, 7)
+
+    def test_drills_command_without_argument_selects_history_and_can_cancel(self):
+        spec = {"target_pattern": {
+            "mechanism": "机制", "trigger": "触发", "failure_behavior": "失败",
+            "desired_behavior": "期望", "success_signal": "成功",
+            "private_sentinel": "不应公开",
+        }}
+        older = self.db.record_drill_attempt(
+            self.source_error_id, spec, "旧题", "答案", "作答", True, "反馈",
+        )
+        newer = self.db.record_drill_attempt(
+            self.source_error_id, spec, "新题", "答案", "作答", False, "反馈",
+        )
+        app = ErrGrindApplication(self.db, object(), PromptManager())
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        state.application = lambda: app
+        before = self.db.conn.total_changes
+        with (
+            patch("errgrind.cli.commands.select_from_list", return_value=1) as select,
+            patch("errgrind.cli.commands.popup_content") as popup,
+        ):
+            _cmd_drills(state, "")
+        self.assertEqual(select.call_args.args[0][0].attempt_id, newer.attempt_id)
+        self.assertEqual(select.call_args.args[0][-1].attempt_id, older.attempt_id)
+        rendered = "".join(
+            part[1] if isinstance(part, tuple) and len(part) > 1 else str(part)
+            for part in popup.call_args.args[0]
+        )
+        self.assertIn("旧题", rendered)
+        self.assertNotIn("不应公开", rendered)
+        self.assertEqual(self.db.conn.total_changes, before)
+
+        with (
+            patch("errgrind.cli.commands.select_from_list", return_value=None),
+            patch("errgrind.cli.commands.popup_content") as cancelled_popup,
+        ):
+            _cmd_drills(state, "")
+        cancelled_popup.assert_not_called()
+        self.assertEqual(self.db.conn.total_changes, before)
+
+    def test_drills_command_empty_history_is_friendly(self):
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        state.application = lambda: SimpleNamespace(list_drill_history=lambda: [])
+        with (
+            patch("errgrind.cli.commands.sysmsg") as message,
+            patch("errgrind.cli.commands.select_from_list") as select,
+        ):
+            _cmd_drills(state, "")
+        message.assert_called_once_with("暂无已判分 Drill 记录")
+        select.assert_not_called()
+
+    def test_drills_command_rejects_invalid_and_missing_ids(self):
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        app = SimpleNamespace(get_drill_history=lambda attempt_id: None)
+        state.application = lambda: app
+        with patch("errgrind.cli.commands.errmsg") as message:
+            _cmd_drills(state, "abc")
+        message.assert_called_once_with("Drill ID 必须是整数")
+        with patch("errgrind.cli.commands.errmsg") as message:
+            _cmd_drills(state, "999")
+        message.assert_called_once_with("未找到 Drill 记录 #999")
+
+    def test_drill_judgment_result_only_shows_exact_verdict(self):
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        for is_correct, expected in ((True, "正确"), (False, "错误")):
+            calls = []
+
+            class DrillApp:
+                def prepare_drill(self, on_stage=None):
+                    return SimpleNamespace(question="练习题")
+
+                def judge_and_record_drill(self, preparation, answer):
+                    calls.append((preparation.question, answer))
+                    return SimpleNamespace(
+                        is_correct=is_correct,
+                        feedback="不应显示的反馈",
+                        attempt=SimpleNamespace(derived_error_id=123),
+                    )
+
+            state.application = lambda app=DrillApp(): app
+            with (
+                patch("errgrind.cli.commands.popup_drill_answer", return_value="作答"),
+                patch("errgrind.cli.commands.popup_content") as popup,
+                patch("errgrind.cli.commands.sysmsg") as sys_message,
+                patch("errgrind.cli.commands.successmsg") as success,
+                patch("errgrind.cli.commands.errmsg") as error,
+            ):
+                _cmd_drill(state, "")
+            self.assertEqual(popup.call_count, 1)
+            self.assertEqual(popup.call_args.args[0], expected)
+            self.assertEqual(calls, [("练习题", "作答")])
+            sys_message.assert_called_once_with("⚖️ 判分评估中...")
+            success.assert_not_called()
+            error.assert_not_called()
+
+    def test_drill_image_draft_is_confirmed_before_judge(self):
+        calls = []
+
+        class DrillApp:
+            def prepare_drill(self, on_stage=None):
+                return SimpleNamespace(question="新题")
+
+            def transcribe_drill_answer(self, path):
+                calls.append(("ocr", path))
+                return "图片答案"
+
+            def judge_and_record_drill(self, preparation, answer):
+                calls.append(("judge", answer))
+                return SimpleNamespace(is_correct=True, feedback="正确")
+
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        state.application = lambda: DrillApp()
+
+        def answer_popup(question, image_loader=None):
+            self.assertEqual(question, "新题")
+            self.assertIsNotNone(image_loader)
+            with patch("errgrind.cli.commands.popup_input", return_value="/tmp/answer.png"):
+                self.assertEqual(image_loader(), "图片答案")
+            return "人工确认后的答案"
+
+        with (
+            patch("errgrind.cli.commands.popup_drill_answer", side_effect=answer_popup),
+            patch("errgrind.cli.commands.popup_content"),
+            patch("errgrind.cli.commands.sysmsg"),
+            patch("errgrind.cli.commands.successmsg"),
+        ):
+            _cmd_drill(state, "")
+        self.assertEqual(calls, [("ocr", "/tmp/answer.png"), ("judge", "人工确认后的答案")])
+
+    def test_drill_answer_cancel_does_not_call_judge(self):
+        class DrillApp:
+            def prepare_drill(self, on_stage=None):
+                return SimpleNamespace(question="新题")
+
+            def transcribe_drill_answer(self, path):
+                return "识别出的答案"
+
+            def judge_and_record_drill(self, preparation, answer):
+                raise AssertionError("取消作答后不应判分")
+
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        state.application = lambda: DrillApp()
+        def answer_popup(question, image_loader=None):
+            self.assertIsNotNone(image_loader)
+            with patch("errgrind.cli.commands.popup_input", return_value="/tmp/answer.png"):
+                self.assertEqual(image_loader(), "识别出的答案")
+            return None
+
+        with (
+            patch("errgrind.cli.commands.popup_drill_answer", side_effect=answer_popup),
+            patch("errgrind.cli.commands.popup_content"),
+            patch("errgrind.cli.commands.sysmsg"),
+            patch("errgrind.cli.commands.errmsg"),
+        ):
+            _cmd_drill(state, "")
+
     def test_correct_answer_records_attempt_without_creating_error(self):
         llm = _FakeLLM([
             self._valid_spec(),
@@ -619,7 +830,9 @@ class DrillWorkflowTests(unittest.TestCase):
             attempts[0].judge_schema_sha256,
             expected_schema_digest,
         )
-        answer_popup.assert_called_once_with("新的练习题")
+        answer_popup.assert_called_once()
+        self.assertEqual(answer_popup.call_args.args, ("新的练习题",))
+        self.assertIn("image_loader", answer_popup.call_args.kwargs)
         result_popup.assert_called_once()
 
     def test_source_leak_terms_ignore_workflow_words_and_math_functions(self):

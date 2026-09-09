@@ -37,19 +37,19 @@ COMMANDS: dict = {}
 COMMAND_DESCRIPTIONS: dict[str, str] = {}
 
 
-def _record_image_loader(state, field, mark_ocr):
-    """Return a popup callback that obtains and transcribes one local image."""
+def _image_loader(transcribe, *, mark_ocr=None):
+    """Return a callback that selects one image and returns an OCR draft."""
     def load():
-        image_path = popup_input(
-            "📷 添加图片",
-            "请输入图片路径（支持 PNG、JPEG、WebP，最大 20 MB；图片会发送给当前 AI provider）：",
-            multiline=False,
-        )
-        if not image_path or not image_path.strip():
-            return None
         try:
+            image_path = popup_input(
+                "📷 添加图片",
+                "请输入图片路径（支持 PNG、JPEG、WebP，最大 20 MB；图片会发送给当前 AI provider）：",
+                multiline=False,
+            )
+            if not image_path or not image_path.strip():
+                return None
             with console.status("[bold cyan]🔎 正在识别图片...[/bold cyan]", spinner="dots"):
-                text = state.application().transcribe_record_field(image_path.strip(), field)
+                text = transcribe(image_path.strip())
         except (KeyboardInterrupt, EOFError):
             popup_content("图片识别已取消，当前输入已保留。", title="图片识别")
             return None
@@ -57,11 +57,27 @@ def _record_image_loader(state, field, mark_ocr):
             popup_content(f"图片识别失败，当前输入已保留。\n\n{exc}", title="图片识别失败")
             return None
         if isinstance(text, str) and text.strip():
-            mark_ocr["used"] = True
+            if mark_ocr is not None:
+                mark_ocr["used"] = True
             return text.strip()
         popup_content("图片识别未返回文字，当前输入已保留。", title="图片识别")
         return None
     return load
+
+
+def _record_image_loader(state, field, mark_ocr):
+    """Return a field OCR callback for the record form."""
+    return _image_loader(
+        lambda image_path: state.application().transcribe_record_field(image_path, field),
+        mark_ocr=mark_ocr,
+    )
+
+
+def _drill_image_loader(state):
+    """Return a callback for appending OCR to the current Drill answer."""
+    return _image_loader(
+        lambda image_path: state.application().transcribe_drill_answer(image_path),
+    )
 
 
 def _record_form(state, initial_values=None):
@@ -392,7 +408,9 @@ def _cmd_drill(state, arg):
         errmsg(str(exc))
         return
 
-    user_response = popup_drill_answer(preparation.question)
+    user_response = popup_drill_answer(
+        preparation.question, image_loader=_drill_image_loader(state)
+    )
     if not user_response:
         sysmsg("已取消作答")
         return
@@ -404,26 +422,69 @@ def _cmd_drill(state, arg):
         errmsg(str(exc))
         return
 
-    if judgment.is_correct:
-        popup_content(
-            "本次演练判定为正确。该结果会作为一次干预记录保存，"
-            "不等于未来错误已减少。",
-            title="演练评估结果",
-        )
-        successmsg("本次演练判定为正确，结果已记录")
-    else:
-        body = [("bold red", "❌ 本次演练判定为错误\n\n")]
-        if judgment.feedback:
-            body.append(("class:label", "💡 评估反馈:\n"))
-            body.extend(render_markdown_to_formatted_text(judgment.feedback))
-            body.append(("", "\n"))
-        popup_content(body, title="演练评估结果")
-        errmsg("答错了，已自动将此衍生题作为新 Error 入库")
+    popup_content("正确" if judgment.is_correct else "错误", title="演练评估结果")
 
-        sysmsg(
-            f"新 error (ID: #{judgment.attempt.derived_error_id}) 已入库，"
-            "可随时输入 /resume 处理"
-        )
+
+def _show_drill_history(entry):
+    labels = {
+        "mechanism": "机制",
+        "trigger": "触发条件",
+        "failure_behavior": "错误行为",
+        "desired_behavior": "期望行为",
+        "success_signal": "成功信号",
+    }
+    body = [("class:label", "题目\n")]
+    body.extend(render_markdown_to_formatted_text(entry.question))
+    body.append(("", "\n\n"))
+    body.append(("class:dim", "目标机制（来源 Error 的机制假设，不代表已确认的长期 Pattern）\n\n"))
+    for key, label in labels.items():
+        body.append(("class:label", f"{label}\n"))
+        body.extend(render_markdown_to_formatted_text(entry.target_pattern[key]))
+        body.append(("", "\n\n"))
+    popup_content(body, title=f"Drill 记录 #{entry.attempt_id}")
+
+
+@_register("drills", "查看已判分 Drill 的目标机制")
+def _cmd_drills(state, arg):
+    raw_id = arg.strip() if arg else ""
+    if raw_id:
+        try:
+            attempt_id = int(raw_id)
+        except ValueError:
+            errmsg("Drill ID 必须是整数")
+            return
+        if not 0 < attempt_id <= 9223372036854775807:
+            errmsg("请输入有效的 Drill 记录 ID（正整数）")
+            return
+        try:
+            entry = state.application().get_drill_history(attempt_id)
+        except OutputContractError as exc:
+            errmsg(str(exc))
+            return
+        if entry is None:
+            errmsg(f"未找到 Drill 记录 #{attempt_id}")
+            return
+        _show_drill_history(entry)
+        return
+
+    try:
+        entries = state.application().list_drill_history()
+    except OutputContractError as exc:
+        errmsg(str(exc))
+        return
+    if not entries:
+        sysmsg("暂无已判分 Drill 记录")
+        return
+    selected = select_from_list(
+        entries,
+        lambda entry: f"#{entry.attempt_id}  " + " ".join(
+            render_markdown_to_plain_text(entry.question).split()
+        )[:70],
+        title="已判分 Drill（选择记录查看目标机制）",
+        footer="[↑↓/PgUp/PgDn] 选择   [Enter] 查看   [q/Esc] 返回",
+    )
+    if selected is not None:
+        _show_drill_history(entries[selected])
 
 
 @_register("status", "查看 error 状态统计")
@@ -632,6 +693,7 @@ def _cmd_help(state, arg):
             ("/ocr [路径]", "识别图片，校对后录入 error"),
             ("/resume", "打开双栏工作台 (进行 Grill 诊断 / Teach 讲解)"),
             ("/drill", "结合近期 error 生成综合演练测试题"),
+            ("/drills [ID]", "查看已判分 Drill 的目标机制"),
         ]),
         ("📊 状态与看板", [
             ("/status", "查看错题库状态与完成进度图表看板"),

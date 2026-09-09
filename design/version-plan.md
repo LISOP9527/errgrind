@@ -105,6 +105,8 @@ Drill 应越来越针对 failure mechanism，而不只是生成类似题。好�
 [DrillSpec → Draft → Judge 的信息隔离](decisions/2026-07-28-drill-spec-isolation.md)，
 通过真实样例和使用反馈改进质量，不为单题强保证恢复多级自审链。
 每次完成判分都保存 attempt；当前错误判分会派生新的 `pending-grill` Error，正确判分也保留记录。
+判题后的即时结果仅展示正确或错误；用户可通过 `/drills` 或 `/drills <ID>` 按需查询已判分题目的目标机制。
+查询展示的是来源 Error 的机制假设，详见[Drill 目标查询与判题结果展示](decisions/2026-09-08-drill-target-query-and-verdict.md)。
 
 已知的 V1 Core polishing 任务是拆清 Judge 的“数学正确性”和“是否观察到目标 mechanism evidence”。Judge 至少应区分
 `math_status`（mathematical correctness）与 `mechanism_evidence`（`success_observed`、`failure_observed`、

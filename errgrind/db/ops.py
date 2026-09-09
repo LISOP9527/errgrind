@@ -435,31 +435,38 @@ class Database:
             )
             return DrillAttemptResult(attempt_id, derived_id)
 
-    def list_drill_attempts(self, limit: int = 20) -> list[DrillAttempt]:
-        rows = self.conn.execute(
-            "SELECT * FROM drill_attempts "
-            "ORDER BY created_at DESC, id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [
-            DrillAttempt(
-                id=row["id"],
-                source_error_id=row["source_error_id"],
-                drill_spec=json.loads(row["drill_spec"]),
-                question=row["question"],
-                reference_answer=row["reference_answer"],
-                user_response=row["user_response"],
-                is_correct=bool(row["is_correct"]),
-                feedback=row["feedback"],
-                judge_provider=row["judge_provider"],
-                judge_model=row["judge_model"],
-                judge_prompt_sha256=row["judge_prompt_sha256"],
-                judge_schema_sha256=row["judge_schema_sha256"],
-                derived_error_id=row["derived_error_id"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-            )
-            for row in rows
-        ]
+    def _row_to_drill_attempt(self, row) -> DrillAttempt:
+        return DrillAttempt(
+            id=row["id"],
+            source_error_id=row["source_error_id"],
+            drill_spec=json.loads(row["drill_spec"]),
+            question=row["question"],
+            reference_answer=row["reference_answer"],
+            user_response=row["user_response"],
+            is_correct=bool(row["is_correct"]),
+            feedback=row["feedback"],
+            judge_provider=row["judge_provider"],
+            judge_model=row["judge_model"],
+            judge_prompt_sha256=row["judge_prompt_sha256"],
+            judge_schema_sha256=row["judge_schema_sha256"],
+            derived_error_id=row["derived_error_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def get_drill_attempt(self, attempt_id: int) -> Optional[DrillAttempt]:
+        row = self.conn.execute(
+            "SELECT * FROM drill_attempts WHERE id = ?", (attempt_id,)
+        ).fetchone()
+        return self._row_to_drill_attempt(row) if row else None
+
+    def list_drill_attempts(self, limit: int | None = 20) -> list[DrillAttempt]:
+        query = "SELECT * FROM drill_attempts ORDER BY created_at DESC, id DESC"
+        params = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (limit,)
+        rows = self.conn.execute(query, params).fetchall()
+        return [self._row_to_drill_attempt(row) for row in rows]
 
     def drill_stats(self) -> dict:
         row = self.conn.execute(

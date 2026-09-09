@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Optional
 
-from ..models.types import DrillAttemptResult, ErrorRecord
+from ..models.types import DrillAttemptResult, DrillAttemptView, ErrorRecord
 
 
 def public_error(error: Optional[ErrorRecord]) -> Optional[ErrorRecord]:
