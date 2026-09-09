@@ -1,7 +1,7 @@
 """Field OCR is a draft input operation, including for thoughts-only images."""
 
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from errgrind.application import ErrGrindApplication, OutputContractError, WorkflowModelError
 from errgrind.llm.ocr import OcrError
@@ -29,6 +29,30 @@ class RecordImageApplicationTests(unittest.TestCase):
                 self.assertIn(f"**{label}**", prompt)
                 self.assertIn('{"text":', prompt)
         self.assertEqual(self.db.mock_calls, [])
+
+    def test_drill_answer_uses_current_answer_semantics_and_never_persists(self):
+        self.llm.transcribe_image.return_value = "  当前答案与思路  "
+        result = self.app.transcribe_drill_answer("/tmp/drill.png")
+        self.assertEqual(result, "当前答案与思路")
+        path, prompt = self.llm.transcribe_image.call_args.args
+        self.assertEqual(path, "/tmp/drill.png")
+        self.assertIn("当前 Drill 的答案与解题思路", prompt)
+        self.assertIn("不是过去 Error 的思路", prompt)
+        self.assertIn("忽略图片中的印刷题目和参考解析", prompt)
+        self.assertEqual(self.db.mock_calls, [])
+
+    def test_drill_answer_usage_is_tagged_as_drill_ocr(self):
+        self.llm.transcribe_image.return_value = "答案"
+        with patch("errgrind.application.service.usage_scope") as scope:
+            scope.return_value.__enter__.return_value = None
+            self.app.transcribe_drill_answer("answer.png")
+        self.assertTrue(
+            any(
+                call.kwargs.get("action") == "drill"
+                and call.kwargs.get("stage") == "ocr_drill_answer"
+                for call in scope.call_args_list
+            )
+        )
 
     def test_unknown_field_does_not_call_model(self):
         with self.assertRaises(OutputContractError):
