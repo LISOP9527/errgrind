@@ -47,7 +47,7 @@ class ProviderUsageTests(unittest.TestCase):
         self.assertEqual(row["output_tokens"], 2)
         self.assertEqual(row["total_tokens"], 5)
 
-    def test_openai_stream_captures_terminal_usage_only_chunk(self):
+    def test_openai_stream_captures_terminal_usage_without_injecting_options(self):
         client = object.__new__(LLMClient)
         client.model, client.max_retries, client.provider = "model-x", 1, "deepseek"
         create = Mock(return_value=iter([
@@ -57,8 +57,26 @@ class ProviderUsageTests(unittest.TestCase):
         client.client = SimpleNamespace(max_retries=0, chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
         self.assertEqual(client.stream_chat([], lambda _: None), "hi")
-        self.assertTrue(create.call_args.kwargs["stream_options"]["include_usage"])
+        self.assertNotIn("stream_options", create.call_args.kwargs)
         self.assertEqual(_rows(self.log)[0]["total_tokens"], 5)
+
+    def test_openai_stream_preserves_explicit_options_and_missing_usage_is_unknown(self):
+        client = object.__new__(LLMClient)
+        client.model, client.max_retries, client.provider = "model-x", 1, "openai_compatible"
+        create = Mock(return_value=iter([
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="ok"))], usage=None),
+        ]))
+        client.client = SimpleNamespace(max_retries=0, chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        options = {"include_usage": False}
+
+        self.assertEqual(
+            client.stream_chat([], lambda _: None, stream_options=options),
+            "ok",
+        )
+        self.assertEqual(create.call_args.kwargs["stream_options"], options)
+        row = _rows(self.log)[0]
+        self.assertFalse(row["usage_reported"])
+        self.assertIsNone(row["total_tokens"])
 
     def test_gemini_failure_logs_type_without_response_body(self):
         client = GeminiClient(api_key="secret", model="gemini-test", max_retries=1)
