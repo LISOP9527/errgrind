@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import credentials with context %}
+{% block content %}
+<h1>Drill</h1>
+<div data-drill-key="{{ key }}" data-status-url="{{ url_for('drill_status',key=key) }}">
+{% if not question %}
+<p>根据已有诊断准备一道练习。它不是 Teach 的即时考试。</p>
+<form method="post" action="{{url_for('drill_prepare',key=key)}}" data-action data-stage-url="{{url_for('drill_status',key=key)}}">
+{{ credentials(url_for('drill_prepare',key=key)) }}<button type="submit">Prepare Drill</button></form>
+<p class="hint">生成阶段：spec（提炼出题规格）→ draft（生成题目）。</p>
+{% else %}
+<section class="context"><h2>题目</h2><div class="markdown">{{md(question)}}</div></section>
+{% if result %}
+<h2>{{ '本次判定正确' if result.is_correct else '本次判定错误' }}</h2>
+<p class="muted">已保存判分记录 #{{ result.attempt.attempt_id }}。本次结果不代表长期机制已修复。</p>
+<h3>你的作答</h3><div class="markdown">{{md(answer)}}</div>
+<h3>反馈</h3><div class="markdown">{{md(result.feedback)}}</div>
+{% if result.attempt.derived_error_id %}<p class="notice">已产生新 Error <a href="{{url_for('error_detail',error_id=result.attempt.derived_error_id)}}">#{{result.attempt.derived_error_id}} → 进入 Grill</a></p>{% endif %}
+<a class="button" href="{{url_for('drill_new')}}">准备另一题</a>
+{% else %}
+<form method="post" action="{{url_for('drill_judge',key=key)}}" data-action>
+{{credentials(url_for('drill_judge',key=key))}}
+<label for="drill-answer">答案与解题思路</label><textarea id="drill-answer" name="answer" required rows="9">{{answer}}</textarea><button type="submit">Judge · 提交判分</button></form>
+{% endif %}{% endif %}
+</div>
+<p class="hint">未判分题目暂存在当前 Web 进程，重启后需要重新 Prepare；已判分记录写入 SQLite。</p>
+{% endblock %}

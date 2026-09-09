@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="heading"><h1>Errors</h1><a class="button" href="{{ url_for('record') }}">录入 Error</a></div>
+<div class="error-list">
+{% for error in errors %}<a class="error-row" href="{{ url_for('error_detail', error_id=error.id) }}"><span class="record-id">#{{ error.id }}</span><span class="preview">{{ error.question[:160] }}</span><span class="badge">{{ error.status }}</span><span class="muted">{{ error.origin }}</span></a>
+{% else %}<p>还没有 Error。先录入一道数学错题和你对当时思路的回忆。</p>{% endfor %}
+</div>
+{% endblock %}

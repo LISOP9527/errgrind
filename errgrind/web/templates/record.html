@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import credentials with context %}
+{% block content %}
+<h1>Record Error</h1>
+<p class="muted">记录对当时思路的回忆，允许不完整或不确定；这不是对认知过程的精确记录。</p>
+<form method="post" action="{{ url_for('record_save') }}" data-action>
+{{ credentials(url_for('record_save')) }}
+<input type="hidden" name="ocr_used" value="0">
+{% for field, label in [('question', '题目'), ('user_thoughts', '当时的思路或作答'), ('reference_answer', '参考答案（可空）')] %}
+<div class="field"><label for="{{ field }}">{{ label }}</label>
+{% if field == 'user_thoughts' %}<p class="hint">确实没有思路时，可以填写“没有思路”；不记得的地方可以直接说明。</p>{% endif %}
+<textarea id="{{ field }}" name="{{ field }}" {% if field != 'reference_answer' %}required{% endif %} rows="5"></textarea>
+<label class="upload-label" for="image-{{ field }}">添加此字段的图片</label>
+<input id="image-{{ field }}" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="{{ field }}" data-url="{{ url_for('record_ocr',field=field) }}" data-token="{{ token(url_for('record_ocr',field=field)) }}">
+</div>{% endfor %}
+<p class="hint">图片会发送给当前 AI provider，限 PNG / JPEG / WebP，每张 20 MB。识别文字仅追加到草稿，原图不入库。</p>
+<p>请校对以上文字，确认后保存。</p><button type="submit">确认文字并保存 Error</button>
+</form>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import credentials, action, conversation with context %}
+{% block title %}Error #{{ error.id }} · ErrGrind{% endblock %}
+{% block content %}
+<div class="heading"><h1>Error #{{ error.id }}</h1><span class="badge">{{ error.status }}</span></div>
+<p class="muted">来源 {{ error.origin }}{% if error.source_error_id %} · 来源 Error <a href="{{url_for('error_detail',error_id=error.source_error_id)}}">#{{error.source_error_id}}</a>{% endif %}</p>
+<section class="context"><h2>题目</h2><div class="markdown">{{ md(error.question) }}</div>
+<h3>当时的思路 / 回顾性重建</h3><div class="markdown">{{ md(error.user_thoughts) }}</div>
+{% if error.reference_answer %}<details><summary>参考答案</summary><div class="markdown">{{ md(error.reference_answer) }}</div></details>{% endif %}</section>
+<section id="grill"><h2>Grill <span class="muted phase">{{ '诊断中' if error.status == 'pending-grill' else '已完成 · 只读' }}</span></h2>
+{{ conversation(grill) }}
+{% if error.grilling_summary %}<details open><summary>本次诊断总结</summary><div class="markdown">{{ md(error.grilling_summary) }}</div></details>{% endif %}
+{% if error.status == 'pending-grill' %}
+<div class="actions">{{ action(url_for('conversation',error_id=error.id,kind='grill',action='start'), '开始 / 恢复 Grill') }}
+{{ action(url_for('conversation',error_id=error.id,kind='grill',action='pause'), '暂停 Grill') }}</div>
+{% if grill and grill[-1].role == 'assistant' %}
+<form method="post" action="{{url_for('conversation',error_id=error.id,kind='grill',action='answer')}}" data-action>
+{{ credentials(url_for('conversation',error_id=error.id,kind='grill',action='answer')) }}
+<label for="grill-answer">你的回答</label><textarea id="grill-answer" name="answer" required rows="5" placeholder="按当时的情况回答；不记得可以直接说明。"></textarea><button type="submit">提交 Grill 回答</button></form>
+{% elif grill %}<p class="notice">已保存输入，正在等待模型回复。点击“开始 / 恢复 Grill”继续。</p>{% endif %}
+{% endif %}</section>
+<section id="teach"><h2>Teach <span class="muted phase">{{ '完成 Grill 后可开始' if error.status == 'pending-grill' else '可持续讨论' }}</span></h2>
+{{ conversation(teach) }}
+{% if error.status != 'pending-grill' %}
+<div class="actions">{{ action(url_for('conversation',error_id=error.id,kind='teach',action='start'), '开始 / 恢复 Teach') }}
+{% if teach %}{{ action(url_for('conversation',error_id=error.id,kind='teach',action='finish'), '保存并结束 Teach') }}{% endif %}</div>
+{% if teach and teach[-1].role == 'assistant' %}
+<form method="post" action="{{url_for('conversation',error_id=error.id,kind='teach',action='answer')}}" data-action>
+{{ credentials(url_for('conversation',error_id=error.id,kind='teach',action='answer')) }}
+<label for="teach-answer">继续提问或讨论</label><textarea id="teach-answer" name="answer" required rows="5"></textarea><button type="submit">提交 Teach 回复</button></form>
+{% elif teach %}<p class="notice">已保存输入，点击“开始 / 恢复 Teach”继续等待回复。</p>{% endif %}
+<p class="hint">“结束”表示本次保存退出，之后仍可继续 Teach。</p>
+{% endif %}</section>
+{% if error.status != 'pending-grill' %}<a class="button" href="{{url_for('drill_new')}}">进入 Drill</a>{% endif %}
+{% endblock %}

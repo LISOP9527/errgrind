@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}">
+  <title>{% block title %}ErrGrind{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script defer src="{{ url_for('static', filename='vendor/katex.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+<header><nav aria-label="主要导航"><strong>ErrGrind</strong><a href="{{ url_for('index') }}">Errors</a><a href="{{ url_for('record') }}">Record</a><a href="{{ url_for('drill_new') }}">Drill</a></nav>
+<p class="model">{{ model_info.provider }} · {{ model_info.model }} · effort: {{ model_info.reasoning_effort }}</p></header>
+<main>
+{% if not configured %}<p class="notice">尚未配置可用模型。请在终端运行 <code>errgrind</code>，使用 <code>/config</code> 配置或登录后重启 Web。仍可查看和录入 Error。</p>{% endif %}
+{% for message in get_flashed_messages() %}<p class="notice">{{ message }}</p>{% endfor %}
+<div id="working" class="notice working" role="status" hidden></div>
+<div id="request-error" class="notice error" role="alert" hidden></div>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

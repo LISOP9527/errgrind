@@ -298,8 +298,12 @@ def _cmd_record(state, arg):
         sysmsg("记录已取消")
         return
 
-    error_id = state.db.create_error(**values)
-    successmsg(f"已成功录入错题库 (Error #{error_id})")
+    try:
+        error = state.application().record_error(**values)
+    except WorkflowPersistenceError as exc:
+        errmsg(str(exc))
+        return
+    successmsg(f"已成功录入错题库 (Error #{error.id})")
     sysmsg("输入 /resume 开始处理错题")
 
 
@@ -341,8 +345,12 @@ def _cmd_ocr(state, arg):
         return
     values["origin"] = "ocr"
 
-    error_id = state.db.create_error(**values)
-    successmsg(f"OCR 校对完成，已录入错题库 (Error #{error_id})")
+    try:
+        error = state.application().record_error(**values)
+    except WorkflowPersistenceError as exc:
+        errmsg(str(exc))
+        return
+    successmsg(f"OCR 校对完成，已录入错题库 (Error #{error.id})")
     sysmsg("输入 /resume 开始处理错题")
 
 

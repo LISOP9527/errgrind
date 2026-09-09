@@ -10,6 +10,7 @@ from .contracts import (
     DrillPreparation,
     DrillStage,
     GrillResult,
+    WorkflowPersistenceError,
     OutputContractError,
     WorkflowModelError,
     public_error,
@@ -36,6 +37,42 @@ class ErrGrindApplication:
             public_error(error)
             for error in self.db.list_all_errors()
         ]
+
+    def record_error(
+        self,
+        question: str,
+        user_thoughts: str,
+        reference_answer: Optional[str] = None,
+        *,
+        origin: str = "record",
+    ):
+        """Validate and persist one user-recorded Error.
+
+        This is deliberately small: frontends collect and review text, while
+        the application boundary owns validation, provenance, and the public
+        (diagnostic-state-free) return value.
+        """
+        if not isinstance(question, str) or not question.strip():
+            raise OutputContractError("题目不能为空")
+        if not isinstance(user_thoughts, str) or not user_thoughts.strip():
+            raise OutputContractError("用户思路不能为空")
+        if reference_answer is not None and not isinstance(reference_answer, str):
+            raise OutputContractError("参考答案必须是文字")
+        if origin not in {"record", "ocr"}:
+            raise OutputContractError("录题来源必须是 record 或 ocr")
+
+        answer = reference_answer.strip() if reference_answer is not None else None
+        answer = answer or None
+        try:
+            error_id = self.db.create_error(
+                question.strip(), user_thoughts.strip(), answer, origin=origin
+            )
+            error = self.db.get_error(error_id)
+        except Exception as exc:
+            raise WorkflowPersistenceError("保存 Error 失败，请稍后重试") from exc
+        if error is None:
+            raise WorkflowPersistenceError("保存 Error 失败，请稍后重试")
+        return public_error(error)
 
     def delete_error(self, error_id: int) -> None:
         self.db.delete_error(error_id)

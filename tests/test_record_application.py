@@ -1,9 +1,17 @@
 """Field OCR is a draft input operation, including for thoughts-only images."""
 
 import unittest
+import tempfile
 from unittest.mock import Mock
+from pathlib import Path
 
-from errgrind.application import ErrGrindApplication, OutputContractError, WorkflowModelError
+from errgrind.application import (
+    ErrGrindApplication,
+    OutputContractError,
+    WorkflowModelError,
+    WorkflowPersistenceError,
+)
+from errgrind.db.ops import Database
 from errgrind.llm.ocr import OcrError
 from errgrind.llm.prompts import PromptManager
 
@@ -67,3 +75,55 @@ class RecordImageApplicationTests(unittest.TestCase):
                 with self.assertRaises(interruption):
                     self.app.transcribe_record_field("a.png", "user_thoughts")
         self.assertEqual(self.db.mock_calls, [])
+
+
+class RecordErrorApplicationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db = Database(str(Path(self.temp_dir.name) / "errors.db"))
+        self.app = ErrGrindApplication(self.db, Mock(), Mock())
+
+    def tearDown(self):
+        self.db.close()
+        self.temp_dir.cleanup()
+
+    def test_record_error_validates_normalizes_and_returns_public_record(self):
+        result = self.app.record_error(
+            "  求 x  ", "  我直接套公式  ", "  x=2  ", origin="ocr"
+        )
+        self.assertEqual(result.question, "求 x")
+        self.assertEqual(result.user_thoughts, "我直接套公式")
+        self.assertEqual(result.reference_answer, "x=2")
+        self.assertEqual(result.origin, "ocr")
+        self.assertEqual(result.status, "pending-grill")
+        self.assertIsNone(result.grilling_diagnostic_state)
+
+    def test_record_error_rejects_missing_required_fields_or_bad_origin(self):
+        cases = (
+            ("", "思路", None, "题目不能为空"),
+            ("题目", "  ", None, "用户思路不能为空"),
+            ("题目", "思路", 42, "参考答案必须是文字"),
+            ("题目", "思路", None, "录题来源必须是 record 或 ocr"),
+        )
+        for question, thoughts, answer, expected in cases:
+            with self.subTest(expected=expected):
+                origin = "drill" if expected.startswith("录题") else "record"
+                with self.assertRaisesRegex(OutputContractError, expected):
+                    self.app.record_error(question, thoughts, answer, origin=origin)
+        self.assertEqual(self.db.list_all_errors(), [])
+
+    def test_plain_record_defaults_and_optional_answer(self):
+        for answer in (None, "", "  "):
+            result = self.app.record_error("题目", "没有思路", answer)
+            self.assertEqual(result.origin, "record")
+            self.assertIsNone(result.reference_answer)
+            self.assertIsNone(result.source_error_id)
+            self.assertIsNone(result.source_drill_attempt_id)
+
+    def test_record_error_wraps_persistence_failure(self):
+        db = Mock()
+        db.create_error.side_effect = RuntimeError("SQLITE_INTERNAL_DETAILS")
+        app = ErrGrindApplication(db, Mock(), Mock())
+        with self.assertRaisesRegex(WorkflowPersistenceError, "保存 Error 失败") as raised:
+            app.record_error("题目", "思路")
+        self.assertNotIn("SQLITE_INTERNAL_DETAILS", str(raised.exception))
