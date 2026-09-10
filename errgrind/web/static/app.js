@@ -154,6 +154,15 @@ document.querySelectorAll('form[data-action]').forEach(form => {
   });
 });
 
+// Drill is a short action, so entering it starts preparation immediately.
+// The form remains as a no-JavaScript/retry fallback without exposing the
+// internal spec/draft stages in the UI.
+document.querySelectorAll('form[data-auto-prepare]').forEach(form => {
+  window.requestAnimationFrame(() => {
+    if (!active) form.requestSubmit();
+  });
+});
+
 document.querySelectorAll('input[data-ocr-field]').forEach(input => {
   input.addEventListener('change', async () => {
     const file = input.files[0];

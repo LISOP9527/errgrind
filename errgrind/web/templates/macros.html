@@ -1,3 +1,50 @@
 {% macro credentials(path) %}<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="submit_token" value="{{ token(path) }}">{% endmacro %}
 {% macro action(path, label, tone='secondary') %}<form method="post" action="{{ path }}" data-action>{{ credentials(path) }}<button class="{{ tone }}" type="submit">{{ label }}</button></form>{% endmacro %}
-{% macro conversation(items) %}<div class="conversation" aria-label="对话记录">{% for m in items %}<article class="message {{ m.role }}"><div class="speaker">{{ '你' if m.role == 'user' else 'ErrGrind' }}</div><div class="markdown">{{ md(m.content) }}</div></article>{% else %}<p class="muted">对话尚未开始。</p>{% endfor %}</div>{% endmacro %}
+
+{% macro conversation(items) %}
+  {% for m in items %}
+  <article class="message {{ m.role }}">
+    <div class="message-header"><span class="message-author">{{ '你' if m.role == 'user' else 'ErrGrind' }}</span></div>
+    <div class="message-content markdown">{{ md(m.content) }}</div>
+  </article>
+  {% endfor %}
+{% endmacro %}
+
+{% macro record_composer(form_id='record-form', draft_key='record', preview_id='record-preview') %}
+<form id="{{ form_id }}" class="record-composer record-flow" method="post" action="{{ url_for('record_save') }}" data-action data-draft-key="{{ draft_key }}">
+  {{ credentials(url_for('record_save')) }}
+  <input type="hidden" name="ocr_used" value="0">
+  <div class="composer-shell">
+    <label class="sr-only" for="{{ form_id }}-raw-input">错误描述</label>
+    <textarea id="{{ form_id }}-raw-input" name="raw_input" rows="3" placeholder="写下发生了什么、你当时怎么想……"></textarea>
+    <div class="composer-toolbar">
+      <label class="attach-button" for="{{ form_id }}-images" title="添加图片" aria-label="添加图片">
+        <span aria-hidden="true">+</span><span class="attach-label">图片</span>
+        <input id="{{ form_id }}-images" class="file-input" name="images" type="file" accept="image/png,image/jpeg,image/webp" multiple data-draft-images>
+      </label>
+      <span class="composer-note">可以附上题目、草稿或截图</span>
+      <button class="send-button" type="button" aria-label="整理为可编辑草稿" title="整理为可编辑草稿" data-draft-submit data-draft-url="{{ url_for('record_draft') }}" data-submit-token="{{ token(url_for('record_draft')) }}">→</button>
+    </div>
+  </div>
+  <button class="text-action" type="button" data-show-preview aria-controls="{{ preview_id }}">或者直接填写结构化内容</button>
+
+  <section class="record-preview" id="{{ preview_id }}" data-preview hidden>
+    <div class="preview-heading">
+      <h2>校对后再保存</h2>
+      <p class="hint">整理结果只是草稿。请确认文字准确；没有提供的思路不会被自动补写。</p>
+    </div>
+    {% for field, label in [('question','题目'),('user_thoughts','当时的思路或作答'),('reference_answer','参考答案（可空）')] %}
+    <div class="field">
+      <label for="{{ form_id }}-{{ field }}">{{ label }}</label>
+      {% if field == 'user_thoughts' %}<p class="hint">只填写你当时实际记得的内容；没有思路时请直接说明。</p>{% endif %}
+      <textarea id="{{ form_id }}-{{ field }}" name="{{ field }}" {% if field != 'reference_answer' %}required{% endif %} rows="4"></textarea>
+      <label class="field-upload" for="{{ form_id }}-image-{{ field }}">+ 为这个字段添加图片
+        <input id="{{ form_id }}-image-{{ field }}" class="file-input" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="{{ field }}" data-url="{{ url_for('record_ocr',field=field) }}" data-token="{{ token(url_for('record_ocr',field=field)) }}">
+      </label>
+    </div>
+    {% endfor %}
+    <p class="hint">保存后才会创建 Error。</p>
+    <button type="submit">确认并保存</button>
+  </section>
+</form>
+{% endmacro %}

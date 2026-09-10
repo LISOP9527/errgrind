@@ -15,17 +15,26 @@
 <div class="shell">
   <aside class="sidebar" aria-label="工作区导航">
     <div class="brand"><a href="{{ url_for('index') }}">ErrGrind</a><label class="drawer-close" for="drawer-toggle" aria-label="关闭导航">×</label></div>
-    <a class="new-error button" href="{{ url_for('record') }}">+ 新建 Error</a>
-    <nav class="primary-nav"><a class="nav-link" href="{{ url_for('index') }}">Error history</a><a class="nav-link" href="{{ url_for('drill_new') }}">Drill</a></nav>
-    <div class="history" aria-label="Error history"><p class="eyebrow">最近记录</p>
-      {% for item in history_items|default([], true) %}<a class="history-item{% if current_error_id is defined and current_error_id == item.id %} is-current{% endif %}" href="{{ url_for('error_detail', error_id=item.id) }}"><span class="history-title">{{ item.title }}</span><span class="history-meta"><span class="status-dot {{ item.status_tone|default('neutral') }}"></span>{{ item.status_label }} · {{ item.created_label }} · {{ item.source_label }}</span></a>
+    <nav class="primary-nav" aria-label="快速操作">
+      <a class="nav-link" href="{{ url_for('record') }}"><span class="nav-icon" aria-hidden="true">+</span><span>New error</span></a>
+      <a class="nav-link" href="{{ url_for('drill_new') }}"><span class="nav-icon drill-icon" aria-hidden="true">◇</span><span>Drill</span></a>
+    </nav>
+    <div class="history" aria-label="最近 Error">
+      <div class="history-heading">Recent errors</div>
+      {% for item in history_items|default([], true) %}<a class="history-item{% if current_error_id is defined and current_error_id == item.id %} is-current{% endif %}" href="{{ url_for('error_detail', error_id=item.id) }}"><span class="status-dot {{ item.status_tone|default('neutral') }}" aria-hidden="true"></span><span class="history-title">{{ item.title }}</span><span class="sr-only">{{ item.status_label }} · {{ item.created_label }} · {{ item.source_label }}</span></a>
       {% else %}<p class="muted sidebar-empty">还没有 Error</p>{% endfor %}
     </div>
-    <a class="config-link" href="{{ url_for('config') }}">Config</a>
+    <a class="config-link" href="{{ url_for('config') }}"><span class="nav-icon" aria-hidden="true">⚙</span><span>Config</span></a>
   </aside>
   <div class="page">
-    <header class="topbar"><label class="menu-button" for="drawer-toggle" aria-label="打开导航">☰</label><span class="topbar-context">{{ self.title() }}</span>{% if not configured %}<span class="config-warning">模型未配置</span>{% endif %}</header>
-    <main>{% if not configured %}<p class="notice">尚未配置可用模型。仍可查看和录入 Error。</p>{% endif %}{% for message in get_flashed_messages() %}<p class="notice">{{ message }}</p>{% endfor %}<div id="working" class="notice working" role="status" hidden></div><div id="request-error" class="notice error" role="alert" hidden></div>{% block content %}{% endblock %}</main>
+    <header class="topbar"><label class="menu-button" for="drawer-toggle" aria-label="打开导航">☰</label><span class="topbar-context">{{ self.title() }}</span>{% if not configured %}<span class="config-warning">未配置模型</span>{% endif %}</header>
+    <main>
+      {% if not configured %}<p class="notice config-notice">尚未配置可用模型。仍可查看和录入 Error。</p>{% endif %}
+      {% for message in get_flashed_messages() %}<p class="notice">{{ message }}</p>{% endfor %}
+      <div id="working" class="notice working" role="status" hidden></div>
+      <div id="request-error" class="notice error" role="alert" hidden></div>
+      {% block content %}{% endblock %}
+    </main>
   </div>
 </div>
 </body>
