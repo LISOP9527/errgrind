@@ -20,19 +20,19 @@
 {% set count_done = errors|selectattr('status', 'equalto', 'done')|list|length %}
 
 <div class="stats-grid">
-  <div class="stat-card" data-filter="all" role="button" tabindex="0" title="点击筛选全部错题">
+  <div class="stat-card">
     <span class="stat-label">总错题数</span>
     <span class="stat-value">{{ total }}</span>
   </div>
-  <div class="stat-card" data-filter="pending-grill" role="button" tabindex="0" title="点击筛选待诊断错题">
+  <div class="stat-card">
     <span class="stat-label">待主动诊断 (Grill)</span>
     <span class="stat-value" style="color: var(--grill-dot);">{{ count_grill }}</span>
   </div>
-  <div class="stat-card" data-filter="pending-teach" role="button" tabindex="0" title="点击筛选待复盘错题">
+  <div class="stat-card">
     <span class="stat-label">待思维复盘 (Teach)</span>
     <span class="stat-value" style="color: var(--teach-dot);">{{ count_teach }}</span>
   </div>
-  <div class="stat-card" data-filter="done" role="button" tabindex="0" title="点击筛选已完成复盘错题">
+  <div class="stat-card">
     <span class="stat-label">已复盘 / 可随时继续</span>
     <span class="stat-value" style="color: var(--done-dot);">{{ count_done }}</span>
   </div>
@@ -40,20 +40,13 @@
 
 {% if errors %}
 <div class="filter-bar" role="tablist" aria-label="按状态过滤错题">
-  <button type="button" role="tab" aria-selected="true" class="filter-btn active" data-filter="all">全部 ({{ total }})</button>
-  <button type="button" role="tab" aria-selected="false" class="filter-btn" data-filter="pending-grill">待诊断 · pending-grill ({{ count_grill }})</button>
-  <button type="button" role="tab" aria-selected="false" class="filter-btn" data-filter="pending-teach">待复盘 · pending-teach ({{ count_teach }})</button>
-  <button type="button" role="tab" aria-selected="false" class="filter-btn" data-filter="done">已完成 · done ({{ count_done }})</button>
+  <button type="button" class="filter-btn active" data-filter="all">全部 ({{ total }})</button>
+  <button type="button" class="filter-btn" data-filter="pending-grill">待诊断 · pending-grill ({{ count_grill }})</button>
+  <button type="button" class="filter-btn" data-filter="pending-teach">待复盘 · pending-teach ({{ count_teach }})</button>
+  <button type="button" class="filter-btn" data-filter="done">已完成 · done ({{ count_done }})</button>
 </div>
 
 <div class="error-list">
-  <div id="filter-empty" class="empty-state" style="display: none; padding: 2.2rem 1.5rem; margin: 0.5rem 0;">
-    <div class="empty-state-icon">🔍</div>
-    <h3 class="empty-state-title" style="margin-bottom: 0.35rem;">当前筛选分类下暂无错题</h3>
-    <p class="empty-state-desc" style="margin-bottom: 0.85rem;">可切换到“全部”查看已有错题，或点击右上角录入新错题。</p>
-    <button type="button" class="button button-secondary" data-reset-filter>查看全部错题</button>
-  </div>
-
   {% for error in errors %}
   <a class="error-row error-card" href="{{ url_for('error_detail', error_id=error.id) }}" data-status="{{ error.status }}">
     <div class="error-card-header">

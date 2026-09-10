@@ -38,20 +38,18 @@
 <span class="badge badge-origin" title="演练中答错自动衍生的错题">
   🎯 Drill 衍生{% if source_error_id %}（源自 #{{ source_error_id }}）{% endif %}
 </span>
-{% elif origin == 'record' %}
-<span class="badge badge-origin" title="手动输入题目与思路录入">✍️ 手动录入</span>
 {% else %}
-<span class="badge badge-origin" title="历史错题数据">📁 历史错题</span>
+<span class="badge badge-origin" title="手动输入录入">✍️ 记录录入</span>
 {% endif %}
 {% endmacro %}
 
-{% macro conversation(items, kind='grill') %}
+{% macro conversation(items) %}
 <div class="conversation" tabindex="0" aria-label="已保存对话">
   {% for m in items %}
   <article class="message {{ m.role }}">
     <div class="message-header">
       <span class="speaker">{{ '你' if m.role == 'user' else 'ErrGrind' }}</span>
-      <span class="speaker-tag">{{ '思考过程' if m.role == 'user' else ('主动诊断' if kind == 'grill' else '思维复盘') }}</span>
+      <span class="speaker-tag">{{ '思考过程' if m.role == 'user' else '诊断助手' }}</span>
     </div>
     <div class="markdown">{{ md(m.content) }}</div>
   </article>

@@ -16,9 +16,6 @@
   --text-muted: #64748b;
   --text-faint: #94a3b8;
   --text-inverse: #ffffff;
-  --slate-600: #475569;
-  --slate-700: #334155;
-  --slate-800: #1e293b;
 
   /* Borders & Dividers */
   --border-subtle: #f1f5f9;
@@ -259,19 +256,6 @@ nav a.active {
   margin-bottom: 0;
 }
 
-.model-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--done-dot);
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.model-dot.unconfigured {
-  background: var(--alert-dot);
-}
-
 /* ==========================================================================
    Main Container & Layout
    ========================================================================== */
@@ -329,38 +313,9 @@ main {
   50% { border-left-color: #d97706; }
 }
 
-.notice.working::before {
-  content: "";
-  display: inline-block;
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--working-text);
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-right: 0.5rem;
-  vertical-align: -1px;
-  flex-shrink: 0;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 /* ==========================================================================
    Page Headers & Action Bars
    ========================================================================== */
-
-.page-header {
-  margin-bottom: 1.25rem;
-}
-
-.page-subtitle {
-  color: var(--text-muted);
-  font-size: 0.92rem;
-  line-height: 1.5;
-  margin: 0.35rem 0 0;
-}
 
 .heading {
   display: flex;
@@ -519,14 +474,6 @@ main {
   background: var(--done-dot);
 }
 
-.badge-origin {
-  background: var(--surface-bg);
-  border-color: var(--border-default);
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 500;
-}
-
 /* ==========================================================================
    Cards, Panels & Sections
    ========================================================================== */
@@ -614,12 +561,6 @@ section .context {
   color: var(--text-muted);
 }
 
-.diagnosis-body {
-  font-size: 0.95rem;
-  line-height: 1.65;
-  color: var(--text-primary);
-}
-
 .diagnosis-footer {
   margin-top: 0.75rem;
   padding-top: 0.5rem;
@@ -648,17 +589,6 @@ section .context {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-}
-
-.stat-card[data-filter] {
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.stat-card[data-filter]:hover {
-  border-color: var(--brand-500);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
 }
 
 .stat-label {
@@ -988,13 +918,6 @@ button:disabled {
   border-bottom: none;
 }
 
-.card.field {
-  padding: 1.5rem;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  margin-bottom: 1.5rem;
-}
-
 .upload-zone {
   margin-top: 0.5rem;
   display: flex;
@@ -1012,19 +935,6 @@ button:disabled {
 .upload-zone:hover, .upload-zone.dragover {
   background: var(--brand-50);
   border-color: var(--brand-500);
-}
-
-.upload-zone.dragover {
-  border-style: solid;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
-}
-
-.upload-zone * {
-  pointer-events: none;
-}
-
-.upload-zone input[type=file], .upload-zone label {
-  pointer-events: auto;
 }
 
 .upload-label {
@@ -1249,10 +1159,6 @@ summary:hover {
     justify-content: flex-start;
   }
 
-  .notice.working {
-    top: 5.75rem;
-  }
-
   main {
     padding: 1rem 1rem 2rem;
   }
@@ -1279,10 +1185,6 @@ summary:hover {
 }
 
 @media (max-width: 480px) {
-  .notice.working {
-    top: 6.25rem;
-  }
-
   .stats-grid {
     grid-template-columns: 1fr;
   }

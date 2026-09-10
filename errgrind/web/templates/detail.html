@@ -16,14 +16,8 @@
       <p class="page-subtitle">
         {% if error.source_error_id %}
         来自演练衍生错题 · 源自父级 Error <a href="{{ url_for('error_detail', error_id=error.source_error_id) }}">#{{ error.source_error_id }}</a>
-        {% elif error.origin == 'ocr' %}
-        来源：图片 OCR 识别录入
-        {% elif error.origin == 'record' %}
-        来源：手动录入
-        {% elif error.origin == 'drill' %}
-        来源：演练衍生错题
         {% else %}
-        来源：历史错题
+        来源：{{ error.origin }}
         {% endif %}
         {% if error.created_at %}
         · 记录于 {{ error.created_at.strftime('%Y-%m-%d %H:%M') if error.created_at.strftime is defined else error.created_at }}
@@ -59,11 +53,11 @@
       <span class="step-desc">{% if error.status == 'pending-grill' %}待 Grill 完成后解锁{% elif error.status == 'pending-teach' %}待复盘讨论{% else %}已复盘·可随时继续{% endif %}</span>
     </div>
   </div>
-  <div class="pipeline-step {% if error.status == 'done' %}step-active{% else %}step-waiting{% endif %}">
+  <div class="pipeline-step {% if error.status != 'pending-grill' %}step-completed{% else %}step-waiting{% endif %}">
     <div class="step-number">4</div>
     <div class="step-info">
       <span class="step-title">Drill 针对演练</span>
-      <span class="step-desc">{% if error.status == 'pending-grill' %}需先完成 Grill{% elif error.status == 'pending-teach' %}建议复盘后演练{% else %}随时发起演练检验{% endif %}</span>
+      <span class="step-desc">{% if error.status != 'pending-grill' %}已具备出题诊断{% else %}需诊断结果{% endif %}</span>
     </div>
   </div>
 </nav>
@@ -110,7 +104,7 @@
     Grill 的首要目标是主动诊断导致错误的思维机制（failure mechanism），通过针对性追问排除竞争解释；它不是教学也不是考试。
   </p>
 
-  {{ conversation(grill, kind='grill') }}
+  {{ conversation(grill) }}
 
   {% if error.grilling_summary %}
   <div class="diagnosis-card">
@@ -132,10 +126,8 @@
 
   {% if error.status == 'pending-grill' %}
   <div class="actions">
-    {{ action(url_for('conversation', error_id=error.id, kind='grill', action='start'), '继续诊断 (Resume Grill)' if grill else '开始主动诊断 (Grill)', 'button') }}
-    {% if grill %}
+    {{ action(url_for('conversation', error_id=error.id, kind='grill', action='start'), '开始 / 恢复 Grill', 'button') }}
     {{ action(url_for('conversation', error_id=error.id, kind='grill', action='pause'), '暂停 Grill', 'button-secondary') }}
-    {% endif %}
   </div>
 
   {% if grill and grill[-1].role == 'assistant' %}
@@ -181,10 +173,10 @@
     Teach 针对已诊断出的思维机制帮助你理解并修正思考过程。你可以随时提问、反思或退出；退出后对话完全保留，随时可继续。
   </p>
 
-  {{ conversation(teach, kind='teach') }}
+  {{ conversation(teach) }}
 
   <div class="actions">
-    {{ action(url_for('conversation', error_id=error.id, kind='teach', action='start'), '继续 Teach 复盘' if teach else '开始思维复盘 (Teach)', 'button') }}
+    {{ action(url_for('conversation', error_id=error.id, kind='teach', action='start'), '开始 / 恢复 Teach', 'button') }}
     {% if teach %}
     {{ action(url_for('conversation', error_id=error.id, kind='teach', action='finish'), '保存并结束 Teach', 'button-secondary') }}
     {% endif %}

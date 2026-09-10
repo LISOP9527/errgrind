@@ -20,28 +20,28 @@
     <div class="step-number">1</div>
     <div class="step-info">
       <span class="step-title">Spec 规格提炼</span>
-      <span class="step-desc">{% if not question %}分析历史成因{% else %}规格已提炼{% endif %}</span>
-    </div>
-  </div>
-  <div class="pipeline-step {% if not question %}step-waiting{% else %}step-completed{% endif %}">
-    <div class="step-number">2</div>
-    <div class="step-info">
-      <span class="step-title">Draft 题目生成</span>
-      <span class="step-desc">{% if not question %}隔离出题{% else %}新题已就绪{% endif %}</span>
+      <span class="step-desc">提取机制成因</span>
     </div>
   </div>
   <div class="pipeline-step {% if not question %}step-waiting{% elif not result %}step-active{% else %}step-completed{% endif %}">
+    <div class="step-number">2</div>
+    <div class="step-info">
+      <span class="step-title">Draft 题目生成</span>
+      <span class="step-desc">隔离信息出题</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if not question or not result %}step-active{% else %}step-completed{% endif %}">
     <div class="step-number">3</div>
     <div class="step-info">
       <span class="step-title">作答推导</span>
-      <span class="step-desc">{% if not question %}需生成题目{% elif not result %}提供行为证据{% else %}作答已提交{% endif %}</span>
+      <span class="step-desc">提供行为证据</span>
     </div>
   </div>
-  <div class="pipeline-step {% if result %}step-completed{% else %}step-waiting{% endif %}">
+  <div class="pipeline-step {% if result %}step-active step-completed{% else %}step-waiting{% endif %}">
     <div class="step-number">4</div>
     <div class="step-info">
       <span class="step-title">Judge 判题</span>
-      <span class="step-desc">{% if result %}判分已完成{% else %}待提交后判题{% endif %}</span>
+      <span class="step-desc">原子记录与衍生</span>
     </div>
   </div>
 </nav>
