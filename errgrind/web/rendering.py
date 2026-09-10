@@ -55,4 +55,3 @@ _MARKDOWN = build_markdown()
 def render_markdown(value: str | None) -> str:
     """Render standard Markdown and math into safe HTML."""
     return _MARKDOWN.render(value or "")
-
