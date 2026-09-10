@@ -10,10 +10,11 @@ ErrGrind 通过数学错题中的思考 Evidence 进行 Grill 诊断、Teach 讨
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[web]'
-.venv/bin/python -m errgrind.web
+.venv/bin/errgrind web
 ```
 
 打开 **http://127.0.0.1:8765**。隔离测试可添加 `--db /tmp/errgrind-test.db`。使用现有 ErrGrind 配置、Prompt 与 SQLite 数据库。
+激活 `.venv` 后也可以直接使用 `errgrind web`；或者继续使用 `.venv/bin/python -m errgrind.web`。`--host`、`--port` 和 `--db` 参数保持不变。
 首次使用请先运行 `.venv/bin/errgrind` 配置 provider/model；已有用户可用 CLI `/config` 修改。
 Web 不提供 OAuth 登录或完整配置界面，配置改变后重启 Web 进程。
 

@@ -2,12 +2,12 @@
 import argparse
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='ErrGrind 本机 WebUI（无账号系统）')
     parser.add_argument('--host', default='127.0.0.1', help='默认仅监听本机')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--db', help='使用独立 SQLite 路径，例如临时测试数据库')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         from waitress import serve
         from .app import create_app
