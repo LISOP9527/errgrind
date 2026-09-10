@@ -1,6 +1,43 @@
 {% extends 'base.html' %}
+{% block title %}操作未完成 · ErrGrind{% endblock %}
 {% block content %}
-<h1>操作未完成</h1><p class="notice error">{{error}}</p>
-{% for name in ['question','user_thoughts','reference_answer','answer'] %}{% if draft.get(name) %}<label>{{name}}（本次提交的草稿）</label><textarea readonly>{{draft[name]}}</textarea>{% endif %}{% endfor %}
-<p><a href="{{url_for('index')}}">返回 Errors 查看已保存记录</a></p>
+<div class="page-header">
+  <h1>操作未完成</h1>
+  <div class="notice error" role="alert">
+    <div>
+      <strong>请求未能完成：</strong>
+      {{ error }}
+    </div>
+  </div>
+</div>
+
+{% set has_drafts = draft.get('question') or draft.get('user_thoughts') or draft.get('reference_answer') or draft.get('answer') %}
+{% if has_drafts %}
+<div class="card" style="border-left: 4px solid var(--brand-500); margin-bottom: 1.5rem;">
+  <div class="card-header">
+    <h2>
+      <span>💾</span>
+      草稿安全保留 (Drafts Preserved)
+    </h2>
+    <span class="phase">未丢失</span>
+  </div>
+  <p class="hint" style="margin-bottom: 1rem;">
+    由于网络波动、模型配额或操作冲突，本次提交未成功处理，但你输入的内容已完整保留在下方，请放心复制：
+  </p>
+
+  {% for name, label in [('question', '题目草稿 (Question)'), ('user_thoughts', '当时思路草稿 (Thoughts)'), ('reference_answer', '参考答案草稿 (Reference Answer)'), ('answer', '作答内容草稿 (Answer)')] %}
+    {% if draft.get(name) %}
+    <div style="margin-bottom: 1rem;">
+      <label for="draft-{{ name }}">{{ label }}</label>
+      <textarea id="draft-{{ name }}" readonly rows="4" style="background: var(--surface-subtle);">{{ draft[name] }}</textarea>
+    </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<div style="display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem;">
+  <a href="javascript:history.back()" class="button">← 返回上一页重试</a>
+  <a href="{{ url_for('index') }}" class="button button-secondary">返回 Errors 查看已保存记录</a>
+</div>
 {% endblock %}

@@ -1,35 +1,216 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import credentials, action, conversation with context %}
+{% from 'macros.html' import credentials, action, conversation, status_badge, origin_badge with context %}
 {% block title %}Error #{{ error.id }} · ErrGrind{% endblock %}
 {% block content %}
-<div class="heading"><h1>Error #{{ error.id }}</h1><span class="badge">{{ error.status }}</span></div>
-<p class="muted">来源 {{ error.origin }}{% if error.source_error_id %} · 来源 Error <a href="{{url_for('error_detail',error_id=error.source_error_id)}}">#{{error.source_error_id}}</a>{% endif %}</p>
-<section class="context"><h2>题目</h2><div class="markdown">{{ md(error.question) }}</div>
-<h3>当时的思路 / 回顾性重建</h3><div class="markdown">{{ md(error.user_thoughts) }}</div>
-{% if error.reference_answer %}<details><summary>参考答案</summary><div class="markdown">{{ md(error.reference_answer) }}</div></details>{% endif %}</section>
-<section id="grill"><h2>Grill <span class="muted phase">{{ '诊断中' if error.status == 'pending-grill' else '已完成 · 只读' }}</span></h2>
-{{ conversation(grill) }}
-{% if error.grilling_summary %}<details open><summary>本次诊断总结</summary><div class="markdown">{{ md(error.grilling_summary) }}</div></details>{% endif %}
-{% if error.status == 'pending-grill' %}
-<div class="actions">{{ action(url_for('conversation',error_id=error.id,kind='grill',action='start'), '开始 / 恢复 Grill') }}
-{{ action(url_for('conversation',error_id=error.id,kind='grill',action='pause'), '暂停 Grill') }}</div>
-{% if grill and grill[-1].role == 'assistant' %}
-<form method="post" action="{{url_for('conversation',error_id=error.id,kind='grill',action='answer')}}" data-action>
-{{ credentials(url_for('conversation',error_id=error.id,kind='grill',action='answer')) }}
-<label for="grill-answer">你的回答</label><textarea id="grill-answer" name="answer" required rows="5" placeholder="按当时的情况回答；不记得可以直接说明。"></textarea><button type="submit">提交 Grill 回答</button></form>
-{% elif grill %}<p class="notice">已保存输入，正在等待模型回复。点击“开始 / 恢复 Grill”继续。</p>{% endif %}
-{% endif %}</section>
-<section id="teach"><h2>Teach <span class="muted phase">{{ '完成 Grill 后可开始' if error.status == 'pending-grill' else '可持续讨论' }}</span></h2>
-{{ conversation(teach) }}
+<div class="page-header">
+  <div style="margin-bottom: 0.75rem;">
+    <a href="{{ url_for('index') }}" class="muted">← 返回错题库</a>
+  </div>
+  <div class="heading">
+    <div>
+      <h1>
+        Error #{{ error.id }}
+        {{ status_badge(error.status) }}
+        {{ origin_badge(error.origin, error.source_error_id) }}
+      </h1>
+      <p class="page-subtitle">
+        {% if error.source_error_id %}
+        来自演练衍生错题 · 源自父级 Error <a href="{{ url_for('error_detail', error_id=error.source_error_id) }}">#{{ error.source_error_id }}</a>
+        {% else %}
+        来源：{{ error.origin }}
+        {% endif %}
+        {% if error.created_at %}
+        · 记录于 {{ error.created_at.strftime('%Y-%m-%d %H:%M') if error.created_at.strftime is defined else error.created_at }}
+        {% endif %}
+      </p>
+    </div>
+    {% if error.status != 'pending-grill' %}
+    <a class="button" href="{{ url_for('drill_new') }}">针对演练 · 进入 Drill →</a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Workflow Stepper Pipeline -->
+<nav class="workflow-pipeline" aria-label="学习阶段进度">
+  <div class="pipeline-step step-completed">
+    <div class="step-number">1</div>
+    <div class="step-info">
+      <span class="step-title">错题记录</span>
+      <span class="step-desc">原始真实 Evidence</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if error.status == 'pending-grill' %}step-active{% else %}step-completed{% endif %}">
+    <div class="step-number">2</div>
+    <div class="step-info">
+      <span class="step-title">Grill 主动诊断</span>
+      <span class="step-desc">{% if error.status == 'pending-grill' %}诊断中·区分成因{% else %}机制诊断已生成{% endif %}</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if error.status == 'pending-teach' %}step-active{% elif error.status == 'done' %}step-completed{% else %}step-waiting{% endif %}">
+    <div class="step-number">3</div>
+    <div class="step-info">
+      <span class="step-title">Teach 思维复盘</span>
+      <span class="step-desc">{% if error.status == 'pending-grill' %}待 Grill 完成后解锁{% elif error.status == 'pending-teach' %}待复盘讨论{% else %}已复盘·可随时继续{% endif %}</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if error.status != 'pending-grill' %}step-completed{% else %}step-waiting{% endif %}">
+    <div class="step-number">4</div>
+    <div class="step-info">
+      <span class="step-title">Drill 针对演练</span>
+      <span class="step-desc">{% if error.status != 'pending-grill' %}已具备出题诊断{% else %}需诊断结果{% endif %}</span>
+    </div>
+  </div>
+</nav>
+
+<!-- 1. Authentic Error Context -->
+<section class="context">
+  <div class="card-header">
+    <h2>错题内容与思路记录</h2>
+    <span class="phase">真实错题 Evidence</span>
+  </div>
+
+  <div style="margin-bottom: 1.25rem;">
+    <h3 style="font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 0.4rem;">题目</h3>
+    <div class="markdown" style="font-size: 1.05rem; padding: 0.25rem 0;">{{ md(error.question) }}</div>
+  </div>
+
+  <div style="margin-bottom: 1.25rem; background: var(--surface-subtle); border-left: 3px solid var(--brand-500); padding: 0.85rem 1rem; border-radius: var(--radius-sm);">
+    <h3 style="font-size: 0.88rem; color: var(--brand-800); margin-bottom: 0.35rem;">当时的思路 / 回顾性重建 (Noisy Evidence)</h3>
+    <div class="markdown" style="font-size: 0.95rem;">{{ md(error.user_thoughts) }}</div>
+    <p class="hint" style="margin-top: 0.5rem; margin-bottom: 0;">注：录题时的回忆属于回顾性证据，可能存在遗漏或偏差；Grill 将据此澄清具体思考步骤。</p>
+  </div>
+
+  {% if error.reference_answer %}
+  <details>
+    <summary>查看参考答案（折叠保护）</summary>
+    <div class="markdown" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-default);">
+      {{ md(error.reference_answer) }}
+    </div>
+  </details>
+  {% endif %}
+</section>
+
+<!-- 2. Grill Section -->
+<section id="grill">
+  <div class="card-header">
+    <h2>
+      <span>🔍</span>
+      Grill 主动诊断
+    </h2>
+    <span class="phase">{{ '诊断中 · 澄清机制' if error.status == 'pending-grill' else '已完成 · 只读记录' }}</span>
+  </div>
+
+  <p class="hint" style="margin-bottom: 1rem;">
+    Grill 的首要目标是主动诊断导致错误的思维机制（failure mechanism），通过针对性追问排除竞争解释；它不是教学也不是考试。
+  </p>
+
+  {{ conversation(grill) }}
+
+  {% if error.grilling_summary %}
+  <div class="diagnosis-card">
+    <div class="diagnosis-card-header">
+      <div class="diagnosis-tag">
+        <span class="diagnosis-icon">🎯</span>
+        <strong>本次机制诊断结论 (Episode Diagnosis Hypothesis)</strong>
+      </div>
+      <span class="diagnosis-note">仅代表本次错题假设，长期 Pattern 需后续独立 Evidence 验证</span>
+    </div>
+    <div class="diagnosis-body markdown">
+      {{ md(error.grilling_summary) }}
+    </div>
+    <div class="diagnosis-footer">
+      💡 该机制假设已沉淀，将作为后续 Teach 复盘的纠偏靶点与 Drill 生成的规格来源。
+    </div>
+  </div>
+  {% endif %}
+
+  {% if error.status == 'pending-grill' %}
+  <div class="actions">
+    {{ action(url_for('conversation', error_id=error.id, kind='grill', action='start'), '开始 / 恢复 Grill', 'button') }}
+    {{ action(url_for('conversation', error_id=error.id, kind='grill', action='pause'), '暂停 Grill', 'button-secondary') }}
+  </div>
+
+  {% if grill and grill[-1].role == 'assistant' %}
+  <form method="post" action="{{ url_for('conversation', error_id=error.id, kind='grill', action='answer') }}" data-action style="margin-top: 1.25rem;">
+    {{ credentials(url_for('conversation', error_id=error.id, kind='grill', action='answer')) }}
+    <label for="grill-answer">
+      你的回答
+      <span class="shortcut-hint">（支持 Ctrl+Enter 提交）</span>
+    </label>
+    <textarea id="grill-answer" name="answer" required rows="5" placeholder="请按当时做题时的实际想法回答；如果不记得或当时凭感觉，直接说明即可。"></textarea>
+    <div style="display: flex; justify-content: flex-end; margin-top: 0.5rem;">
+      <button type="submit">提交 Grill 回答</button>
+    </div>
+  </form>
+  {% elif grill %}
+  <div class="notice">
+    <div>已保存你的输入，正在等待模型回复。点击上方“开始 / 恢复 Grill”继续。</div>
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+
+<!-- 3. Teach Section -->
+<section id="teach" style="{% if error.status == 'pending-grill' %}opacity: 0.75;{% endif %}">
+  <div class="card-header">
+    <h2>
+      <span>💡</span>
+      Teach 思维复盘
+    </h2>
+    <span class="phase">{{ '需先完成 Grill 诊断' if error.status == 'pending-grill' else '可持续复盘讨论' }}</span>
+  </div>
+
+  {% if error.status == 'pending-grill' %}
+  <div class="empty-state" style="padding: 2rem 1rem;">
+    <div class="empty-state-icon">🔒</div>
+    <h3 class="empty-state-title">Teach 阶段暂未解锁</h3>
+    <p class="empty-state-desc">
+      ErrGrind 坚持“先诊断后干预”的原则。请先在上方完成 Grill 诊断，明确具体思维成因后，再进入针对性复盘讨论。
+    </p>
+  </div>
+  {% else %}
+  <p class="hint" style="margin-bottom: 1rem;">
+    Teach 针对已诊断出的思维机制帮助你理解并修正思考过程。你可以随时提问、反思或退出；退出后对话完全保留，随时可继续。
+  </p>
+
+  {{ conversation(teach) }}
+
+  <div class="actions">
+    {{ action(url_for('conversation', error_id=error.id, kind='teach', action='start'), '开始 / 恢复 Teach', 'button') }}
+    {% if teach %}
+    {{ action(url_for('conversation', error_id=error.id, kind='teach', action='finish'), '保存并结束 Teach', 'button-secondary') }}
+    {% endif %}
+  </div>
+
+  {% if teach and teach[-1].role == 'assistant' %}
+  <form method="post" action="{{ url_for('conversation', error_id=error.id, kind='teach', action='answer') }}" data-action style="margin-top: 1.25rem;">
+    {{ credentials(url_for('conversation', error_id=error.id, kind='teach', action='answer')) }}
+    <label for="teach-answer">
+      继续提问或表达你的理解
+      <span class="shortcut-hint">（支持 Ctrl+Enter 提交）</span>
+    </label>
+    <textarea id="teach-answer" name="answer" required rows="5" placeholder="输入你想探讨的问题，或者根据诊断尝试重新推导一遍..."></textarea>
+    <div style="display: flex; justify-content: flex-end; margin-top: 0.5rem;">
+      <button type="submit">提交 Teach 回复</button>
+    </div>
+  </form>
+  {% elif teach %}
+  <div class="notice">
+    <div>已保存你的输入，点击上方“开始 / 恢复 Teach”继续等待回复。</div>
+  </div>
+  {% endif %}
+  <p class="hint" style="margin-top: 0.75rem;">提示：“结束”仅表示本次保存并归档，状态进入 <code>done</code>，之后仍可随时回来追加讨论。</p>
+  {% endif %}
+</section>
+
+<!-- 4. Drill Guidance CTA -->
 {% if error.status != 'pending-grill' %}
-<div class="actions">{{ action(url_for('conversation',error_id=error.id,kind='teach',action='start'), '开始 / 恢复 Teach') }}
-{% if teach %}{{ action(url_for('conversation',error_id=error.id,kind='teach',action='finish'), '保存并结束 Teach') }}{% endif %}</div>
-{% if teach and teach[-1].role == 'assistant' %}
-<form method="post" action="{{url_for('conversation',error_id=error.id,kind='teach',action='answer')}}" data-action>
-{{ credentials(url_for('conversation',error_id=error.id,kind='teach',action='answer')) }}
-<label for="teach-answer">继续提问或讨论</label><textarea id="teach-answer" name="answer" required rows="5"></textarea><button type="submit">提交 Teach 回复</button></form>
-{% elif teach %}<p class="notice">已保存输入，点击“开始 / 恢复 Teach”继续等待回复。</p>{% endif %}
-<p class="hint">“结束”表示本次保存退出，之后仍可继续 Teach。</p>
-{% endif %}</section>
-{% if error.status != 'pending-grill' %}<a class="button" href="{{url_for('drill_new')}}">进入 Drill</a>{% endif %}
+<div class="derived-error-banner" style="background: linear-gradient(135deg, #eff6ff, #f0fdf4); border-color: #bfdbfe;">
+  <div>
+    <div style="font-weight: 700; color: var(--brand-800); margin-bottom: 0.25rem;">准备好检验思考机制了吗？</div>
+    <div class="muted" style="font-size: 0.88rem;">Drill 将基于当前已有的机制假设提炼规格并生成新题，检验你在新任务中是否能正确应用思考模式。</div>
+  </div>
+  <a class="button" href="{{ url_for('drill_new') }}">前往针对演练 Drill →</a>
+</div>
+{% endif %}
 {% endblock %}

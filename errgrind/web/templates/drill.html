@@ -1,27 +1,160 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import credentials with context %}
+{% block title %}Drill 针对演练 · ErrGrind{% endblock %}
 {% block content %}
-<h1>Drill</h1>
-<div data-drill-key="{{ key }}" data-status-url="{{ url_for('drill_status',key=key) }}">
-{% if not question %}
-<p>根据已有诊断准备一道练习。它不是 Teach 的即时考试。</p>
-<form method="post" action="{{url_for('drill_prepare',key=key)}}" data-action data-stage-url="{{url_for('drill_status',key=key)}}">
-{{ credentials(url_for('drill_prepare',key=key)) }}<button type="submit">Prepare Drill</button></form>
-<p class="hint">生成阶段：spec（提炼出题规格）→ draft（生成题目）。</p>
-{% else %}
-<section class="context"><h2>题目</h2><div class="markdown">{{md(question)}}</div></section>
-{% if result %}
-<h2>{{ '本次判定正确' if result.is_correct else '本次判定错误' }}</h2>
-<p class="muted">已保存判分记录 #{{ result.attempt.attempt_id }}。本次结果不代表长期机制已修复。</p>
-<h3>你的作答</h3><div class="markdown">{{md(answer)}}</div>
-<h3>反馈</h3><div class="markdown">{{md(result.feedback)}}</div>
-{% if result.attempt.derived_error_id %}<p class="notice">已产生新 Error <a href="{{url_for('error_detail',error_id=result.attempt.derived_error_id)}}">#{{result.attempt.derived_error_id}} → 进入 Grill</a></p>{% endif %}
-<a class="button" href="{{url_for('drill_new')}}">准备另一题</a>
-{% else %}
-<form method="post" action="{{url_for('drill_judge',key=key)}}" data-action>
-{{credentials(url_for('drill_judge',key=key))}}
-<label for="drill-answer">答案与解题思路</label><textarea id="drill-answer" name="answer" required rows="9">{{answer}}</textarea><button type="submit">Judge · 提交判分</button></form>
-{% endif %}{% endif %}
+<div class="page-header">
+  <div style="margin-bottom: 0.75rem;">
+    <a href="{{ url_for('index') }}" class="muted">← 返回错题库</a>
+  </div>
+  <div class="heading">
+    <div>
+      <h1>Drill 针对演练 <span class="muted" style="font-size: 1.1rem; font-weight: 500;">(Targeted Drill)</span></h1>
+      <p class="page-subtitle">针对已有错题诊断出的思维机制生成新题，检验思考模式是否真实改变。</p>
+    </div>
+  </div>
 </div>
-<p class="hint">未判分题目暂存在当前 Web 进程，重启后需要重新 Prepare；已判分记录写入 SQLite。</p>
+
+<!-- Workflow Stepper for Drill -->
+<nav class="workflow-pipeline" aria-label="Drill 流程阶段" style="margin-bottom: 1.5rem;">
+  <div class="pipeline-step {% if not question %}step-active{% else %}step-completed{% endif %}">
+    <div class="step-number">1</div>
+    <div class="step-info">
+      <span class="step-title">Spec 规格提炼</span>
+      <span class="step-desc">提取机制成因</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if not question %}step-waiting{% elif not result %}step-active{% else %}step-completed{% endif %}">
+    <div class="step-number">2</div>
+    <div class="step-info">
+      <span class="step-title">Draft 题目生成</span>
+      <span class="step-desc">隔离信息出题</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if not question or not result %}step-active{% else %}step-completed{% endif %}">
+    <div class="step-number">3</div>
+    <div class="step-info">
+      <span class="step-title">作答推导</span>
+      <span class="step-desc">提供行为证据</span>
+    </div>
+  </div>
+  <div class="pipeline-step {% if result %}step-active step-completed{% else %}step-waiting{% endif %}">
+    <div class="step-number">4</div>
+    <div class="step-info">
+      <span class="step-title">Judge 判题</span>
+      <span class="step-desc">原子记录与衍生</span>
+    </div>
+  </div>
+</nav>
+
+<div data-drill-key="{{ key }}" data-status-url="{{ url_for('drill_status', key=key) }}">
+  {% if not question %}
+  <div class="card" style="padding: 2rem 1.5rem; text-align: center;">
+    <div style="font-size: 2.2rem; margin-bottom: 0.75rem;">🎯</div>
+    <h2 style="font-size: 1.25rem; margin-bottom: 0.5rem;">准备针对性演练题目</h2>
+    <p style="max-width: 520px; margin: 0 auto 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">
+      系统将读取你最近错题的 Grill 诊断结果，提炼出关键的思考机制假设，并由隔离模型生成一道结构类似但形式不同的新题目。<br>
+      <span class="muted">Drill 不是 Teach 的即时测验，而是一次验证思维模式是否纠偏的行为机会。</span>
+    </p>
+
+    <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-stage-url="{{ url_for('drill_status', key=key) }}">
+      {{ credentials(url_for('drill_prepare', key=key)) }}
+      <button type="submit" style="padding: 0.75rem 2rem; font-size: 1rem;">开始准备练习题 (Prepare Drill)</button>
+    </form>
+
+    <div style="margin-top: 1.5rem; font-size: 0.82rem; color: var(--text-muted);">
+      生成两阶段：<strong>spec</strong>（分析历史错题提炼出题规格）→ <strong>draft</strong>（严格隔离原题生成新题目）
+    </div>
+  </div>
+  {% else %}
+
+  <!-- Question Section -->
+  <section class="context">
+    <div class="card-header">
+      <h2>
+        <span>📝</span>
+        练习题目
+      </h2>
+      <span class="phase">针对机制衍生题</span>
+    </div>
+    <div class="markdown" style="font-size: 1.1rem; line-height: 1.7; padding: 0.5rem 0;">
+      {{ md(question) }}
+    </div>
+  </section>
+
+  {% if result %}
+  <!-- Judged Result Section -->
+  <div class="drill-verdict-card {{ 'correct' if result.is_correct else 'wrong' }}">
+    <div class="verdict-icon">{{ '✅' if result.is_correct else '❌' }}</div>
+    <div>
+      <div class="verdict-title">{{ '本次判定正确' if result.is_correct else '本次判定错误' }}</div>
+      <div style="font-size: 0.875rem;">已原子保存判分记录 #{{ result.attempt.attempt_id }}。本次结果为局部 Evidence，不代表长期机制已彻底掌握。</div>
+    </div>
+  </div>
+
+  {% if result.attempt.derived_error_id %}
+  <div class="derived-error-banner">
+    <div>
+      <div class="derived-error-text">⚠️ 观察到目标思维机制仍有偏差，已自动生成新错题！</div>
+      <div class="muted" style="font-size: 0.85rem;">已将本次演练作答与题目自动存入错题库 #{{ result.attempt.derived_error_id }}，可直接开展针对性 Grill 诊断。</div>
+    </div>
+    <a class="button" href="{{ url_for('error_detail', error_id=result.attempt.derived_error_id) }}">进入新 Error #{{ result.attempt.derived_error_id }} →</a>
+  </div>
+  {% endif %}
+
+  <section>
+    <div class="card-header">
+      <h2>你的作答推导</h2>
+    </div>
+    <div class="markdown" style="font-size: 0.95rem;">
+      {{ md(answer) }}
+    </div>
+  </section>
+
+  <section>
+    <div class="card-header">
+      <h2>判题反馈 (Judge Feedback)</h2>
+    </div>
+    <div class="markdown" style="font-size: 0.95rem;">
+      {{ md(result.feedback) }}
+    </div>
+  </section>
+
+  <div style="display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem; flex-wrap: wrap;">
+    <a class="button" href="{{ url_for('drill_new') }}">准备另一道题 (Prepare Next Drill)</a>
+    <a class="button button-secondary" href="{{ url_for('index') }}">返回错题库</a>
+  </div>
+
+  {% else %}
+  <!-- Answering Section -->
+  <section>
+    <div class="card-header">
+      <h2>作答与推理过程</h2>
+      <span class="phase">待提交判分</span>
+    </div>
+    <p class="hint" style="margin-bottom: 0.75rem;">
+      请写出你的最终答案，并尽量写下关键推导步骤。Judge 将依据推导过程评估目标思考机制是否已正确执行。
+    </p>
+
+    <form method="post" action="{{ url_for('drill_judge', key=key) }}" data-action>
+      {{ credentials(url_for('drill_judge', key=key)) }}
+      <label for="drill-answer">
+        答案与解题思路
+        <span class="shortcut-hint">（支持 Ctrl+Enter 提交）</span>
+      </label>
+      <textarea id="drill-answer" name="answer" required rows="9" placeholder="在此输入你的求解过程与最终结果...">{{ answer }}</textarea>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; flex-wrap: wrap; gap: 1rem;">
+        <span class="hint">未提交的草稿保留在当前页面；点击后由 Judge 模型判题。</span>
+        <button type="submit">Judge · 提交判分</button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+
+  {% endif %}
+</div>
+
+<p class="hint" style="margin-top: 2rem; border-top: 1px solid var(--border-default); padding-top: 0.75rem;">
+  注：未判分题目暂存于当前 Web 进程内存中，重启后需要重新 Prepare；已判分记录与可能衍生的新 Error 会原子持久化至 SQLite。
+</p>
 {% endblock %}
