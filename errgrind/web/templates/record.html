@@ -1,101 +1,19 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import credentials with context %}
-{% block title %}录入错题 · ErrGrind{% endblock %}
 {% block content %}
-<div class="page-header">
-  <div style="margin-bottom: 0.75rem;">
-    <a href="{{ url_for('index') }}" class="muted">← 返回错题库</a>
-  </div>
-  <div class="heading">
-    <div>
-      <h1>录入错题 <span class="muted" style="font-size: 1.1rem; font-weight: 500;">(Record Error)</span></h1>
-      <p class="page-subtitle">真实是有效诊断的前提。记录你当时的最真实的思考与卡点，为后续 Grill 提供诊断 Evidence 锚点。</p>
-    </div>
-  </div>
-</div>
-
+<h1>Record Error</h1>
+<p class="muted">记录对当时思路的回忆，允许不完整或不确定；这不是对认知过程的精确记录。</p>
 <form method="post" action="{{ url_for('record_save') }}" data-action>
-  {{ credentials(url_for('record_save')) }}
-  <input type="hidden" name="ocr_used" value="0">
-
-  <!-- 1. Question Field -->
-  <div class="card field">
-    <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem; padding-bottom: 0;">
-      <label for="question" style="margin: 0; font-size: 1rem;">
-        1. 错题题目 <span style="color: var(--alert-text); font-weight: 700;">*</span>
-      </label>
-      <span class="phase">必填</span>
-    </div>
-    <p class="hint" style="margin-bottom: 0.75rem;">粘贴数学题目文本，支持 LaTeX 公式（如 <code>$x^2 + y^2 = 1$</code>）。</p>
-    <textarea id="question" name="question" required rows="5" placeholder="请输入数学错题题目..."></textarea>
-
-    <div class="upload-zone">
-      <label class="upload-label" for="image-question">
-        <span>📷</span>
-        <span>添加题目图片进行 OCR 识别</span>
-      </label>
-      <input id="image-question" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="question" data-url="{{ url_for('record_ocr', field='question') }}" data-token="{{ token(url_for('record_ocr', field='question')) }}">
-      <span class="upload-hint">限 PNG / JPEG / WebP，≤ 20 MB；识别后追加到上方</span>
-    </div>
-  </div>
-
-  <!-- 2. User Thoughts Field -->
-  <div class="card field">
-    <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem; padding-bottom: 0;">
-      <label for="user_thoughts" style="margin: 0; font-size: 1rem;">
-        2. 当时的思路 / 回顾性作答 <span style="color: var(--alert-text); font-weight: 700;">*</span>
-      </label>
-      <span class="phase">必填 · 诊断核心证据</span>
-    </div>
-    <div class="notice" style="margin-bottom: 0.75rem; background: var(--surface-subtle); border-color: var(--border-default); border-left-color: var(--brand-500);">
-      <p class="hint" style="margin: 0;">
-        💡 <strong>重点：</strong>请尽量回忆你当时是怎么想的，在哪里卡住，凭什么直觉套用了公式。即使是完全错误的步骤、模糊的印象，也是定位思维机制最关键的 Evidence。<br>
-        确实没有思路时，可以填写<strong>“没有思路”</strong>；不记得的地方可以直接说明。
-      </p>
-    </div>
-    <textarea id="user_thoughts" name="user_thoughts" required rows="5" placeholder="回忆当时的解题过程、尝试的方向或卡住的地方..."></textarea>
-
-    <div class="upload-zone">
-      <label class="upload-label" for="image-user_thoughts">
-        <span>📷</span>
-        <span>添加草稿纸或作答步骤图片进行 OCR 识别</span>
-      </label>
-      <input id="image-user_thoughts" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="user_thoughts" data-url="{{ url_for('record_ocr', field='user_thoughts') }}" data-token="{{ token(url_for('record_ocr', field='user_thoughts')) }}">
-      <span class="upload-hint">支持手写草稿识别；识别文字将追加到草稿</span>
-    </div>
-  </div>
-
-  <!-- 3. Reference Answer Field -->
-  <div class="card field">
-    <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem; padding-bottom: 0;">
-      <label for="reference_answer" style="margin: 0; font-size: 1rem;">
-        3. 参考答案（可选）
-      </label>
-      <span class="phase">选填</span>
-    </div>
-    <p class="hint" style="margin-bottom: 0.75rem;">标准答案或解析（可留空）。在随后的 Grill 诊断中将默认折叠隐藏，避免干扰诊断过程。</p>
-    <textarea id="reference_answer" name="reference_answer" rows="4" placeholder="如有标准答案或解析可填入此处（可选）..."></textarea>
-
-    <div class="upload-zone">
-      <label class="upload-label" for="image-reference_answer">
-        <span>📷</span>
-        <span>添加参考答案图片进行 OCR 识别</span>
-      </label>
-      <input id="image-reference_answer" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="reference_answer" data-url="{{ url_for('record_ocr', field='reference_answer') }}" data-token="{{ token(url_for('record_ocr', field='reference_answer')) }}">
-      <span class="upload-hint">识别文字将追加到上方文本框</span>
-    </div>
-  </div>
-
-  <!-- Submission Control Bar -->
-  <div class="card" style="background: var(--surface-subtle); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
-    <div>
-      <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem;">校对并保存错题</div>
-      <div class="hint">图片识别文字仅追加到文本框供校对，原图不存储入库；点击保存后立即进入 pending-grill 状态。</div>
-    </div>
-    <div style="display: flex; align-items: center; gap: 0.75rem;">
-      <a href="{{ url_for('index') }}" class="button button-secondary">取消</a>
-      <button type="submit" class="button">确认文字并保存 Error</button>
-    </div>
-  </div>
+{{ credentials(url_for('record_save')) }}
+<input type="hidden" name="ocr_used" value="0">
+{% for field, label in [('question', '题目'), ('user_thoughts', '当时的思路或作答'), ('reference_answer', '参考答案（可空）')] %}
+<div class="field"><label for="{{ field }}">{{ label }}</label>
+{% if field == 'user_thoughts' %}<p class="hint">确实没有思路时，可以填写“没有思路”；不记得的地方可以直接说明。</p>{% endif %}
+<textarea id="{{ field }}" name="{{ field }}" {% if field != 'reference_answer' %}required{% endif %} rows="5"></textarea>
+<label class="upload-label" for="image-{{ field }}">添加此字段的图片</label>
+<input id="image-{{ field }}" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="{{ field }}" data-url="{{ url_for('record_ocr',field=field) }}" data-token="{{ token(url_for('record_ocr',field=field)) }}">
+</div>{% endfor %}
+<p class="hint">图片会发送给当前 AI provider，限 PNG / JPEG / WebP，每张 20 MB。识别文字仅追加到草稿，原图不入库。</p>
+<p>请校对以上文字，确认后保存。</p><button type="submit">确认文字并保存 Error</button>
 </form>
 {% endblock %}

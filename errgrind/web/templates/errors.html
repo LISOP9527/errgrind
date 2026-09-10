@@ -1,86 +1,8 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import status_badge, origin_badge with context %}
-{% block title %}错题库 · ErrGrind{% endblock %}
 {% block content %}
-<div class="page-header">
-  <div class="heading">
-    <div>
-      <h1>错题库 <span class="muted" style="font-size: 1.1rem; font-weight: 500;">(Error Episodes)</span></h1>
-      <p class="page-subtitle">以真实错题为 Evidence 锚点，通过 Grill 诊断机制成因，通过 Teach 与 Drill 实施认知纠偏。</p>
-    </div>
-    <a class="button" href="{{ url_for('record') }}">
-      <span>+</span> 录入新 Error
-    </a>
-  </div>
-</div>
-
-{% set total = errors|length %}
-{% set count_grill = errors|selectattr('status', 'equalto', 'pending-grill')|list|length %}
-{% set count_teach = errors|selectattr('status', 'equalto', 'pending-teach')|list|length %}
-{% set count_done = errors|selectattr('status', 'equalto', 'done')|list|length %}
-
-<div class="stats-grid">
-  <div class="stat-card">
-    <span class="stat-label">总错题数</span>
-    <span class="stat-value">{{ total }}</span>
-  </div>
-  <div class="stat-card">
-    <span class="stat-label">待主动诊断 (Grill)</span>
-    <span class="stat-value" style="color: var(--grill-dot);">{{ count_grill }}</span>
-  </div>
-  <div class="stat-card">
-    <span class="stat-label">待思维复盘 (Teach)</span>
-    <span class="stat-value" style="color: var(--teach-dot);">{{ count_teach }}</span>
-  </div>
-  <div class="stat-card">
-    <span class="stat-label">已复盘 / 可随时继续</span>
-    <span class="stat-value" style="color: var(--done-dot);">{{ count_done }}</span>
-  </div>
-</div>
-
-{% if errors %}
-<div class="filter-bar" role="tablist" aria-label="按状态过滤错题">
-  <button type="button" class="filter-btn active" data-filter="all">全部 ({{ total }})</button>
-  <button type="button" class="filter-btn" data-filter="pending-grill">待诊断 · pending-grill ({{ count_grill }})</button>
-  <button type="button" class="filter-btn" data-filter="pending-teach">待复盘 · pending-teach ({{ count_teach }})</button>
-  <button type="button" class="filter-btn" data-filter="done">已完成 · done ({{ count_done }})</button>
-</div>
-
+<div class="heading"><h1>Errors</h1><a class="button" href="{{ url_for('record') }}">录入 Error</a></div>
 <div class="error-list">
-  {% for error in errors %}
-  <a class="error-row error-card" href="{{ url_for('error_detail', error_id=error.id) }}" data-status="{{ error.status }}">
-    <div class="error-card-header">
-      <div class="error-card-meta">
-        <span class="record-id">#{{ error.id }}</span>
-        {{ status_badge(error.status) }}
-        {{ origin_badge(error.origin, error.source_error_id) }}
-      </div>
-      {% if error.created_at %}
-      <span class="muted" style="font-size: 0.78rem;">{{ error.created_at.strftime('%Y-%m-%d %H:%M') if error.created_at.strftime is defined else error.created_at }}</span>
-      {% endif %}
-    </div>
-
-    <div class="preview error-preview markdown">
-      {{ md(error.question[:200] ~ ('...' if error.question|length > 200 else '')) }}
-    </div>
-
-    {% if error.grilling_summary %}
-    <div class="error-summary-snippet">
-      <strong>🎯 诊断结论：</strong>{{ error.grilling_summary[:140] }}{% if error.grilling_summary|length > 140 %}...{% endif %}
-    </div>
-    {% endif %}
-  </a>
-  {% endfor %}
+{% for error in errors %}<a class="error-row" href="{{ url_for('error_detail', error_id=error.id) }}"><span class="record-id">#{{ error.id }}</span><span class="preview">{{ error.question[:160] }}</span><span class="badge">{{ error.status }}</span><span class="muted">{{ error.origin }}</span></a>
+{% else %}<p>还没有 Error。先录入一道数学错题和你对当时思路的回忆。</p>{% endfor %}
 </div>
-{% else %}
-<div class="empty-state">
-  <div class="empty-state-icon">📓</div>
-  <h2 class="empty-state-title">还没有错题记录</h2>
-  <p class="empty-state-desc">
-    先录入一道你做错的数学题，并回忆当时的思路与卡点。<br>
-    ErrGrind 将通过多轮提问，帮助你精确定位导致错误的思维机制。
-  </p>
-  <a class="button" href="{{ url_for('record') }}">立即录入第一道错题</a>
-</div>
-{% endif %}
 {% endblock %}

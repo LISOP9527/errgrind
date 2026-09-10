@@ -2,61 +2,13 @@
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="submit_token" value="{{ token(path) }}">
 {% endmacro %}
-
-{% macro action(path, label, class_name="button") %}
+{% macro action(path, label) %}
 <form method="post" action="{{ path }}" data-action>
-  {{ credentials(path) }}
-  <button type="submit" class="{{ class_name }}">{{ label }}</button>
+{{ credentials(path) }}<button type="submit">{{ label }}</button>
 </form>
 {% endmacro %}
-
-{% macro status_badge(status) %}
-{% if status == 'pending-grill' %}
-<span class="badge badge-pending-grill" data-status="pending-grill" title="正在主动诊断思维成因">
-  <span class="badge-dot" aria-hidden="true"></span>
-  待诊断 · pending-grill
-</span>
-{% elif status == 'pending-teach' %}
-<span class="badge badge-pending-teach" data-status="pending-teach" title="诊断已完成，待复盘教学">
-  <span class="badge-dot" aria-hidden="true"></span>
-  待复盘 · pending-teach
-</span>
-{% elif status == 'done' %}
-<span class="badge badge-done" data-status="done" title="复盘已归档，仍可随时继续讨论">
-  <span class="badge-dot" aria-hidden="true"></span>
-  已完成 · done
-</span>
-{% else %}
-<span class="badge" data-status="{{ status }}">{{ status }}</span>
-{% endif %}
-{% endmacro %}
-
-{% macro origin_badge(origin, source_error_id=None) %}
-{% if origin == 'ocr' %}
-<span class="badge badge-origin" title="由题目/草稿图片 OCR 识别录入">📷 OCR 识别</span>
-{% elif origin == 'drill' %}
-<span class="badge badge-origin" title="演练中答错自动衍生的错题">
-  🎯 Drill 衍生{% if source_error_id %}（源自 #{{ source_error_id }}）{% endif %}
-</span>
-{% else %}
-<span class="badge badge-origin" title="手动输入录入">✍️ 记录录入</span>
-{% endif %}
-{% endmacro %}
-
 {% macro conversation(items) %}
 <div class="conversation" tabindex="0" aria-label="已保存对话">
-  {% for m in items %}
-  <article class="message {{ m.role }}">
-    <div class="message-header">
-      <span class="speaker">{{ '你' if m.role == 'user' else 'ErrGrind' }}</span>
-      <span class="speaker-tag">{{ '思考过程' if m.role == 'user' else '诊断助手' }}</span>
-    </div>
-    <div class="markdown">{{ md(m.content) }}</div>
-  </article>
-  {% else %}
-  <div class="empty-state" style="padding: 1.5rem; margin: 0.5rem 0;">
-    <p class="muted" style="margin: 0;">尚未开始对话。点击下方按钮开始或继续阶段。</p>
-  </div>
-  {% endfor %}
+{% for m in items %}<article class="message {{ m.role }}"><div class="speaker">{{ '你' if m.role == 'user' else 'ErrGrind' }}</div><div class="markdown">{{ md(m.content) }}</div></article>{% else %}<p class="muted">尚未开始对话。</p>{% endfor %}
 </div>
 {% endmacro %}
