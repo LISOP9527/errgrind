@@ -1,14 +1,3 @@
-{% macro credentials(path) %}
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="submit_token" value="{{ token(path) }}">
-{% endmacro %}
-{% macro action(path, label) %}
-<form method="post" action="{{ path }}" data-action>
-{{ credentials(path) }}<button type="submit">{{ label }}</button>
-</form>
-{% endmacro %}
-{% macro conversation(items) %}
-<div class="conversation" tabindex="0" aria-label="已保存对话">
-{% for m in items %}<article class="message {{ m.role }}"><div class="speaker">{{ '你' if m.role == 'user' else 'ErrGrind' }}</div><div class="markdown">{{ md(m.content) }}</div></article>{% else %}<p class="muted">尚未开始对话。</p>{% endfor %}
-</div>
-{% endmacro %}
+{% macro credentials(path) %}<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="submit_token" value="{{ token(path) }}">{% endmacro %}
+{% macro action(path, label, tone='secondary') %}<form method="post" action="{{ path }}" data-action>{{ credentials(path) }}<button class="{{ tone }}" type="submit">{{ label }}</button></form>{% endmacro %}
+{% macro conversation(items) %}<div class="conversation" aria-label="对话记录">{% for m in items %}<article class="message {{ m.role }}"><div class="speaker">{{ '你' if m.role == 'user' else 'ErrGrind' }}</div><div class="markdown">{{ md(m.content) }}</div></article>{% else %}<p class="muted">对话尚未开始。</p>{% endfor %}</div>{% endmacro %}

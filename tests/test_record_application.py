@@ -100,6 +100,30 @@ class RecordImageApplicationTests(unittest.TestCase):
                     self.app.transcribe_record_field("a.png", "user_thoughts")
         self.assertEqual(self.db.mock_calls, [])
 
+    def test_raw_material_is_organized_into_a_reviewable_draft(self):
+        self.llm.chat_json.return_value = {
+            "question": "  题目  ",
+            "user_thoughts": "  思路  ",
+            "reference_answer": "  答案  ",
+        }
+        draft = self.app.prepare_record_draft("题目和思路的原始记录")
+        self.assertEqual(draft.question, "题目")
+        self.assertEqual(draft.user_thoughts, "思路")
+        self.assertEqual(draft.reference_answer, "答案")
+        self.assertEqual(draft.origin, "record")
+        self.assertIn("不能根据题目", self.llm.chat_json.call_args.args[0][0]["content"])
+        self.assertEqual(self.db.mock_calls, [])
+
+    def test_missing_user_thoughts_remains_missing_until_user_review(self):
+        self.llm.chat_json.return_value = {
+            "question": "题目",
+            "user_thoughts": "",
+            "reference_answer": "答案",
+        }
+        draft = self.app.prepare_record_draft("只有题目和答案")
+        self.assertEqual(draft.user_thoughts, "")
+        self.assertEqual(self.db.mock_calls, [])
+
 
 class RecordErrorApplicationTests(unittest.TestCase):
     def setUp(self):

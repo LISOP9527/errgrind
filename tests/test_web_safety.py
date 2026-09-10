@@ -154,11 +154,11 @@ class WebRecoveryTests(unittest.TestCase):
             try:
                 self.assertTrue(entered_spec.wait(3))
                 status = self.client.get(f'/api/drill/{key}').get_json()
-                self.assertEqual(status, {'stage': 'spec'})
+                self.assertEqual(status, {'state': 'preparing'})
                 release_spec.set()
                 self.assertTrue(entered_draft.wait(3))
                 status = self.client.get(f'/api/drill/{key}').get_json()
-                self.assertEqual(status, {'stage': 'draft'})
+                self.assertEqual(status, {'state': 'preparing'})
             finally:
                 release_spec.set(); release_draft.set(); thread.join(5)
         self.assertFalse(thread.is_alive())

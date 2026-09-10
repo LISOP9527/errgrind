@@ -7,6 +7,7 @@ workflow and privacy contracts are still exercised end to end.
 
 import io
 import json
+import re
 import tempfile
 import unittest
 import threading
@@ -133,6 +134,12 @@ class _FakeLLM:
             }])
         if "source_error_number" in required:
             return _spec()
+        if required == {"question", "user_thoughts", "reference_answer"}:
+            return {
+                "question": "整理后的题目",
+                "user_thoughts": "整理后的思路",
+                "reference_answer": "整理后的答案",
+            }
         if "is_correct" in required:
             return {"is_correct": self.judge_correct, "feedback": "正确。" if self.judge_correct else "请先核对适用条件。"}
         if required == {"question", "reference_answer"}:
@@ -190,10 +197,15 @@ class WebApplicationTests(unittest.TestCase):
         record = self.db.list_all_errors()[0]
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"pending-grill", page.data)
+        self.assertIn("待澄清".encode(), page.data)
+        self.assertNotIn(b"pending-grill", page.data)
         detail = self.client.get(f"/errors/{record.id}")
         self.assertEqual(detail.status_code, 200)
         self.assertIn("求".encode(), detail.data)
+        self.assertIn("Original Error".encode(), detail.data)
+        self.assertIn("查看题目".encode(), detail.data)
+        self.assertIn("信息".encode(), detail.data)
+        self.assertNotIn(b"pending-grill", detail.data)
 
         private = "HIDDEN_LEDGER_9A2"
         self.db.save_grilling_progress(record.id, "[]", json.dumps({"private": private}))
@@ -216,6 +228,67 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(len(self.llm.transcribed), 1)
         self.assertFalse(Path(self.llm.transcribed[0]).exists())
 
+    def test_raw_record_draft_is_reviewed_before_persistence(self):
+        page = self.client.get('/record').data.decode()
+        self.assertIn('data-show-preview', page)
+        self.assertIn('id="record-preview" data-preview hidden', page)
+        save_csrf, save_token = _credentials(page, '/record')
+        draft_token = re.search(
+            r'data-draft-submit data-draft-url="[^"]+" data-submit-token="([^"]+)"',
+            page,
+        ).group(1)
+        draft = self.client.post(
+            '/api/record/draft',
+            data={
+                'csrf': save_csrf,
+                'submit_token': draft_token,
+                'raw_input': '题目：求 x。我的思路：直接套公式。',
+            },
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(draft.status_code, 200)
+        self.assertEqual(draft.get_json()['draft']['question'], '整理后的题目')
+        self.assertEqual(self.db.list_all_errors(), [])
+
+        saved = self.client.post(
+            '/record',
+            data={
+                'csrf': save_csrf,
+                'submit_token': save_token,
+                'raw_input': '题目：求 x。我的思路：直接套公式。',
+                'question': '整理后的题目',
+                'user_thoughts': '整理后的思路',
+                'reference_answer': '整理后的答案',
+                'ocr_used': '0',
+            },
+        )
+        self.assertEqual(saved.status_code, 303)
+        self.assertEqual(len(self.db.list_all_errors()), 1)
+
+    def test_image_assisted_record_draft_stays_unpersisted_and_is_ocr_origin(self):
+        page = self.client.get('/record').data.decode()
+        csrf, _ = _credentials(page, '/record')
+        draft_token = re.search(
+            r'data-draft-submit data-draft-url="[^"]+" data-submit-token="([^"]+)"',
+            page,
+        ).group(1)
+        response = self.client.post(
+            '/api/record/draft',
+            data={
+                'csrf': csrf,
+                'submit_token': draft_token,
+                'raw_input': '补充：这是我记得的思路。',
+                'images': (io.BytesIO(b'\x89PNG\r\n\x1a\nimage'), 'paper.png'),
+            },
+            content_type='multipart/form-data',
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['draft']['origin'], 'ocr')
+        self.assertEqual(len(self.llm.transcribed), 1)
+        self.assertFalse(Path(self.llm.transcribed[0]).exists())
+        self.assertEqual(self.db.list_all_errors(), [])
+
     def test_grill_submit_pause_resume_and_complete(self):
         error_id = self.db.create_error("求 x", "我直接套了公式", "x=2")
         start = self.client.get(f"/errors/{error_id}")
@@ -228,9 +301,6 @@ class WebApplicationTests(unittest.TestCase):
         csrf, token = _credentials(page, f'/errors/{error_id}/grill/pause')
         paused = self.client.post(f"/errors/{error_id}/grill/pause", data={"csrf": csrf, "submit_token": token}, headers={"Accept":"application/json"})
         self.assertEqual(paused.status_code, 200)
-        page = self.client.get(f"/errors/{error_id}").data.decode()
-        csrf, token = _credentials(page, f'/errors/{error_id}/grill/start')
-        self.client.post(f"/errors/{error_id}/grill/start", data={"csrf": csrf, "submit_token": token}, headers={"Accept":"application/json"})
         page = self.client.get(f"/errors/{error_id}").data.decode()
         csrf, token = _credentials(page, f'/errors/{error_id}/grill/answer')
         answered = self.client.post(f"/errors/{error_id}/grill/answer", data={"csrf": csrf, "submit_token": token, "answer": "当时没有核对条件"}, headers={"Accept": "application/json"})
@@ -274,10 +344,46 @@ class WebApplicationTests(unittest.TestCase):
         csrf, token = _credentials(judge_page, f'/api/drill/{key}/judge')
         judged = self.client.post(f"/api/drill/{key}/judge", data={"csrf": csrf, "submit_token": token, "answer": "错误答案"}, headers={"X-CSRFToken": csrf, "Accept": "application/json"})
         self.assertEqual(judged.status_code, 200)
-        self.assertIn("请先核对".encode(), self.client.get(judged.get_json()['redirect']).data)
+        result_page = self.client.get(judged.get_json()['redirect']).data
+        self.assertIn("错误".encode(), result_page)
+        self.assertIn("继续查看这道 Error".encode(), result_page)
+        self.assertNotIn("请先核对".encode(), result_page)
+        self.assertNotIn("REFERENCE_ONLY".encode(), result_page)
         records = self.db.list_all_errors()
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0].status, "pending-grill")
+
+    def test_drill_answer_image_is_an_editable_draft_before_judge(self):
+        source = self.db.create_error("求 x", "我直接套了公式")
+        self.db.update_grilling(source, "[]", "当前最受 Evidence 支持的解释")
+        page = self.client.get('/drill', follow_redirects=True).data.decode()
+        key = page.split('data-drill-key="', 1)[1].split('"', 1)[0]
+        csrf, token = _credentials(page, f'/api/drill/{key}/prepare')
+        prepared = self.client.post(
+            f'/api/drill/{key}/prepare',
+            data={'csrf': csrf, 'submit_token': token},
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(prepared.status_code, 200)
+        page = self.client.get(f'/drill/{key}').data.decode()
+        csrf, _ = _credentials(page, f'/api/drill/{key}/judge')
+        ocr_token = re.search(r'data-drill-ocr[^>]+data-token="([^"]+)"', page).group(1)
+        response = self.client.post(
+            f'/api/drill/{key}/ocr',
+            data={
+                'csrf': csrf,
+                'submit_token': ocr_token,
+                'answer': '已有答案',
+                'image': (io.BytesIO(b'\x89PNG\r\n\x1a\nimage'), 'answer.png'),
+            },
+            content_type='multipart/form-data',
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.drill_stats()['total'], 0)
+        page = self.client.get(f'/drill/{key}').data
+        self.assertIn('已有答案'.encode(), page)
+        self.assertIn('OCR 识别的题目'.encode(), page)
 
     def test_error_mapping_and_raw_model_html_is_escaped(self):
         missing = self.client.get("/errors/999999")

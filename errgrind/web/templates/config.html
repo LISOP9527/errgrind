@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block title %}Config · ErrGrind{% endblock %}
+{% block content %}
+<section class="config-page"><p class="eyebrow">CONFIG</p><h1>模型配置</h1><p class="lead">当前 Web workspace 使用 CLI 中保存的配置。</p><dl class="config-list"><div><dt>Provider</dt><dd>{{ model_info.provider }}</dd></div><div><dt>Model</dt><dd>{{ model_info.model }}</dd></div><div><dt>Reasoning effort</dt><dd>{{ model_info.reasoning_effort }}</dd></div></dl><p class="hint">需要修改配置时，请在终端运行 <code>errgrind</code> 并使用 <code>/config</code>。</p></section>
+{% endblock %}

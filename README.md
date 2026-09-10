@@ -17,13 +17,11 @@ python3 -m venv .venv
 首次使用请先运行 `.venv/bin/errgrind` 配置 provider/model；已有用户可用 CLI `/config` 修改。
 Web 不提供 OAuth 登录或完整配置界面，配置改变后重启 Web 进程。
 
-- **Errors**：查看题目、回顾性思路、参考答案及公开 Grill/Teach 对话。
-- **Record**：三个字段分别输入文字或上传 PNG/JPEG/WebP 图片。图片发送给当前 provider；
-  OCR 只追加到可编辑草稿，校对后点击保存才创建 Error。原图不进入业务数据库，临时上传文件随请求删除。
-- **Grill**：开始/恢复、逐次回答、暂停；完成后只读。失败后可从已保存对话恢复。
-- **Teach**：开始/继续讨论、保存结束；结束后仍能继续。
-- **Drill**：Prepare 显示 spec/draft 阶段，题目生成后提交答案与推理进行 Judge；
-  显示反馈，错误判分产生的新 Error 可直接打开。
+- **一个 workspace**：左侧提供 New error、Drill、最近 Error history 和底部 Config；Grill、Teach、Judge 等是当前 Error 时间线中的活动，不是独立页面。
+- **Error**：打开后按 Original Error → Grill → 本次诊断 → Teach → 下一步 → 当前输入的连续时间线查看。原题自然出现在开头，顶部可随时重新打开题目和元数据。
+- **New error**：先用一段文字和可选的 PNG/JPEG/WebP 图片描述错题；模型整理出的结构化草稿必须由用户编辑、确认后才保存。缺少的用户思路不会由模型补写，图片只用于本次整理，原图不入库，临时文件随请求删除。也可以直接填写并确认草稿。
+- **Grill / Teach**：在同一条 Error 时间线中开始、恢复、暂停或继续讨论；完成的 Grill 只读，Teach 保存后仍可继续。
+- **Drill**：一次临时练习只展示题目、答案输入和“正确/错误”结果。答案图片会先转成可编辑草稿；答错时按现有 Core 语义产生新的 Error 并直接进入它。
 
 模型工作时显示等待秒数并禁止重复操作；Grill 不模拟逐 token 输出。
 Markdown 与数学公式在浏览器展示，原始文本保持不变；渲染资源随包提供，无需外部 CDN。

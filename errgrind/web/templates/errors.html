@@ -1,8 +1,3 @@
 {% extends 'base.html' %}
-{% block content %}
-<div class="heading"><h1>Errors</h1><a class="button" href="{{ url_for('record') }}">录入 Error</a></div>
-<div class="error-list">
-{% for error in errors %}<a class="error-row" href="{{ url_for('error_detail', error_id=error.id) }}"><span class="record-id">#{{ error.id }}</span><span class="preview">{{ error.question[:160] }}</span><span class="badge">{{ error.status }}</span><span class="muted">{{ error.origin }}</span></a>
-{% else %}<p>还没有 Error。先录入一道数学错题和你对当时思路的回忆。</p>{% endfor %}
-</div>
-{% endblock %}
+{% block title %}Workspace · ErrGrind{% endblock %}
+{% block content %}<section class="welcome"><p class="eyebrow">ERRGRIND WORKSPACE</p><h1>把一次做错题的过程，留给下一次更好的思考。</h1><p class="lead">从一道真实的数学题开始，记录你当时怎么想，再一起检查哪里出了偏差。</p><div class="welcome-actions"><a class="button" href="{{ url_for('record') }}">新建 Error</a><a class="button secondary" href="{{ url_for('drill_new') }}">开始 Drill</a></div>{% if has_errors %}<p class="muted welcome-hint">从左侧 Error history 打开已有记录。</p>{% else %}<p class="muted welcome-hint">你的记录会出现在左侧 Error history。</p>{% endif %}</section>{% endblock %}

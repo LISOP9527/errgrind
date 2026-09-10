@@ -11,10 +11,13 @@ from .contracts import (
     GrillResult,
     GrillState,
     InvalidWorkflowState,
+    NextStep,
     NoDrillContext,
     OutputContractError,
+    RecordDraft,
     WorkflowModelError,
     WorkflowPersistenceError,
+    next_step_for_error,
 )
 from .service import ErrGrindApplication
 
@@ -30,8 +33,11 @@ __all__ = [
     "GrillResult",
     "GrillState",
     "InvalidWorkflowState",
+    "NextStep",
     "NoDrillContext",
     "OutputContractError",
+    "RecordDraft",
     "WorkflowModelError",
     "WorkflowPersistenceError",
+    "next_step_for_error",
 ]

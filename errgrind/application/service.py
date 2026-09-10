@@ -9,16 +9,32 @@ from .contracts import (
     DrillJudgment,
     DrillPreparation,
     DrillStage,
+    ErrorNotFound,
     GrillResult,
+    NextStep,
+    RecordDraft,
     WorkflowPersistenceError,
     OutputContractError,
     WorkflowModelError,
+    next_step_for_error,
     public_error,
 )
 from ..models.types import DrillAttemptView
 from .drill import DrillWorkflow
 from .grill import GrillWorkflow
 from .teach import TeachWorkflow
+
+
+RECORD_DRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "user_thoughts": {"type": "string"},
+        "reference_answer": {"type": "string"},
+    },
+    "required": ["question", "user_thoughts", "reference_answer"],
+    "additionalProperties": False,
+}
 
 
 class ErrGrindApplication:
@@ -38,6 +54,13 @@ class ErrGrindApplication:
             public_error(error)
             for error in self.db.list_all_errors()
         ]
+
+    def get_next_step(self, error_id: int) -> NextStep:
+        """Return a small, stable recommendation for an Error workspace."""
+        error = self.db.get_error(error_id)
+        if error is None:
+            raise ErrorNotFound(f"找不到 Error #{error_id}")
+        return next_step_for_error(error)
 
     def record_error(
         self,
@@ -89,6 +112,7 @@ class ErrGrindApplication:
             "user_thoughts": "用户当时的思路或作答",
             "reference_answer": "参考答案",
             "drill_answer": "当前 Drill 的答案与解题思路",
+            "record_input": "整张数学错题材料（题目、用户思路或作答、参考答案）",
         }
         if field not in fields:
             raise OutputContractError("不支持的录题字段")
@@ -96,7 +120,8 @@ class ErrGrindApplication:
         if not callable(transcribe):
             raise WorkflowModelError("当前 AI provider 不支持字段图片识别，请切换 provider")
         try:
-            prompt = self.prompts.load("ocr_field.md").format(field=fields[field])
+            prompt_name = "ocr_record_input.md" if field == "record_input" else "ocr_field.md"
+            prompt = self.prompts.load(prompt_name).format(field=fields[field])
             with usage_scope(action=action, stage="ocr_" + field):
                 result = transcribe(image_path, prompt)
         except (KeyboardInterrupt, EOFError):
@@ -116,6 +141,60 @@ class ErrGrindApplication:
         if field not in {"question", "user_thoughts", "reference_answer"}:
             raise OutputContractError("不支持的录题字段")
         return self._transcribe_image_field(image_path, field, action="record")
+
+    @usage_action("record", "ocr_input")
+    def transcribe_record_input(self, image_path: str) -> str:
+        """Transcribe a raw record image without organizing or persisting it."""
+        return self._transcribe_image_field(image_path, "record_input", action="record")
+
+    def prepare_record_draft(
+        self, raw_input: str, image_paths: Optional[list[str]] = None
+    ) -> RecordDraft:
+        """Organize supplied record material into a draft for human review.
+
+        The prompt explicitly treats user thoughts as optional source material;
+        an empty thoughts field remains empty and is rejected only when the
+        user tries to confirm the Error.
+        """
+        if not isinstance(raw_input, str):
+            raise OutputContractError("录入内容必须是文字")
+        image_paths = list(image_paths or [])
+        if not raw_input.strip() and not image_paths:
+            raise OutputContractError("请先输入内容或添加图片")
+        materials = []
+        if raw_input.strip():
+            materials.append("[用户输入的原始内容]\n" + raw_input.strip())
+        for index, image_path in enumerate(image_paths, start=1):
+            text = self.transcribe_record_input(image_path)
+            materials.append(f"[图片 {index} 的忠实转录]\n{text}")
+        source_text = "\n\n".join(materials)
+        prompt = self.prompts.load("record_draft.md").format(source_text=source_text)
+        try:
+            with usage_scope(action="record", stage="draft"):
+                raw = self.llm.chat_json(
+                    [{"role": "user", "content": prompt}],
+                    output_schema=RECORD_DRAFT_SCHEMA,
+                )
+        except (KeyboardInterrupt, EOFError):
+            raise
+        except Exception as exc:
+            raise WorkflowModelError("整理录入草稿失败，请保留原始内容后重试") from exc
+        if not isinstance(raw, dict):
+            raise OutputContractError("录入草稿必须是 JSON 对象")
+        values = {}
+        for field in ("question", "user_thoughts", "reference_answer"):
+            value = raw.get(field, "")
+            if not isinstance(value, str):
+                raise OutputContractError(f"录入草稿字段 {field} 必须是文本")
+            values[field] = value.strip()
+        if not values["question"]:
+            raise OutputContractError("草稿中没有题目，请补充题目后再确认")
+        return RecordDraft(
+            question=values["question"],
+            user_thoughts=values["user_thoughts"],
+            reference_answer=values["reference_answer"],
+            origin="ocr" if image_paths else "record",
+        )
 
     @usage_action("drill", "ocr_answer")
     def transcribe_drill_answer(self, image_path: str) -> str:

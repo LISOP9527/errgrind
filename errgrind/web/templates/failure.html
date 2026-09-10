@@ -1,6 +1,3 @@
 {% extends 'base.html' %}
-{% block content %}
-<h1>操作未完成</h1><p class="notice error">{{error}}</p>
-{% for name in ['question','user_thoughts','reference_answer','answer'] %}{% if draft.get(name) %}<label>{{name}}（本次提交的草稿）</label><textarea readonly>{{draft[name]}}</textarea>{% endif %}{% endfor %}
-<p><a href="{{url_for('index')}}">返回 Errors 查看已保存记录</a></p>
-{% endblock %}
+{% block title %}操作未完成 · ErrGrind{% endblock %}
+{% block content %}<section class="failure"><p class="eyebrow">没有保存完成</p><h1>这次操作没有完成</h1><p class="lead">请保留下面的草稿，返回工作区后可以重新打开记录或稍后再试。</p>{% set safe_draft = draft|default({}, true) %}{% for name, label in [('raw_input','原始内容'),('question','题目'),('user_thoughts','当时的思路'),('reference_answer','参考答案'),('answer','答案')] %}{% if safe_draft.get(name) %}<label>{{ label }}（草稿）</label><textarea readonly>{{ safe_draft[name] }}</textarea>{% endif %}{% endfor %}<a class="button" href="{{ return_url|default(url_for('index')) }}">返回工作区</a></section>{% endblock %}

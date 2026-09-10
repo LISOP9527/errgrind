@@ -19,8 +19,10 @@ def main():
     if args.host not in {'127.0.0.1', 'localhost', '::1'}:
         print('注意：没有内建账号系统，请勿将此端口暴露公网。', flush=True)
     print(f'ErrGrind WebUI: http://{args.host}:{args.port}', flush=True)
+    # Record accepts up to three separately validated 20 MB images in one
+    # reviewed draft request, plus a small multipart envelope.
     serve(app, host=args.host, port=args.port, threads=8,
-          max_request_body_size=21 * 1024 * 1024, expose_tracebacks=False)
+          max_request_body_size=61 * 1024 * 1024, expose_tracebacks=False)
 
 
 if __name__ == '__main__':

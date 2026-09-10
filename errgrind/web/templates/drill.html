@@ -1,27 +1,42 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import credentials with context %}
+{% block title %}Drill · ErrGrind{% endblock %}
 {% block content %}
-<h1>Drill</h1>
-<div data-drill-key="{{ key }}" data-status-url="{{ url_for('drill_status',key=key) }}">
-{% if not question %}
-<p>根据已有诊断准备一道练习。它不是 Teach 的即时考试。</p>
-<form method="post" action="{{url_for('drill_prepare',key=key)}}" data-action data-stage-url="{{url_for('drill_status',key=key)}}">
-{{ credentials(url_for('drill_prepare',key=key)) }}<button type="submit">Prepare Drill</button></form>
-<p class="hint">生成阶段：spec（提炼出题规格）→ draft（生成题目）。</p>
-{% else %}
-<section class="context"><h2>题目</h2><div class="markdown">{{md(question)}}</div></section>
-{% if result %}
-<h2>{{ '本次判定正确' if result.is_correct else '本次判定错误' }}</h2>
-<p class="muted">已保存判分记录 #{{ result.attempt.attempt_id }}。本次结果不代表长期机制已修复。</p>
-<h3>你的作答</h3><div class="markdown">{{md(answer)}}</div>
-<h3>反馈</h3><div class="markdown">{{md(result.feedback)}}</div>
-{% if result.attempt.derived_error_id %}<p class="notice">已产生新 Error <a href="{{url_for('error_detail',error_id=result.attempt.derived_error_id)}}">#{{result.attempt.derived_error_id}} → 进入 Grill</a></p>{% endif %}
-<a class="button" href="{{url_for('drill_new')}}">准备另一题</a>
-{% else %}
-<form method="post" action="{{url_for('drill_judge',key=key)}}" data-action>
-{{credentials(url_for('drill_judge',key=key))}}
-<label for="drill-answer">答案与解题思路</label><textarea id="drill-answer" name="answer" required rows="9">{{answer}}</textarea><button type="submit">Judge · 提交判分</button></form>
-{% endif %}{% endif %}
+<div class="page-intro"><p class="eyebrow">DRILL</p><h1>做一道练习</h1><p class="lead">把刚才整理出的思考方式带到一道新的题里。</p></div>
+<div data-drill-key="{{ key }}" data-status-url="{{ url_for('drill_status', key=key) }}">
+  {% if not question %}
+  <section class="empty-state">
+    {% if state == 'preparing' %}<p>练习正在准备中，请稍后刷新。</p>
+    {% elif state == 'failed' %}<p>上次准备没有完成，可以保留当前页面后再试。</p>
+    {% else %}<p>从已有的 Error 诊断中准备一道新的数学练习。</p>{% endif %}
+    {% if state != 'preparing' %}
+    <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action>
+      {{ credentials(url_for('drill_prepare', key=key)) }}
+      <button type="submit">准备练习</button>
+    </form>
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="drill-question"><p class="eyebrow">QUESTION</p><div class="markdown">{{ md(question) }}</div></section>
+  {% if result %}
+  <section class="verdict {% if result.is_correct %}correct{% else %}incorrect{% endif %}">
+    <p class="eyebrow">RESULT</p><h2>{{ '正确' if result.is_correct else '错误' }}</h2>
+    {% if result.is_correct %}
+    <div class="actions"><a class="button" href="{{ url_for('drill_new') }}">再做一道</a><a class="button secondary" href="{{ url_for('index') }}">返回</a></div>
+    {% else %}
+    <a class="button secondary" href="{{ url_for('error_detail', error_id=result.derived_error_id) if result.derived_error_id else url_for('index') }}">继续查看这道 Error</a>
+    {% endif %}
+  </section>
+  {% else %}
+  <form class="answer-form" method="post" action="{{ url_for('drill_judge', key=key) }}" data-action data-draft-key="drill-{{ key }}">
+    {{ credentials(url_for('drill_judge', key=key)) }}
+    <label for="drill-answer">你的答案</label>
+    <textarea id="drill-answer" name="answer" required rows="10">{{ answer }}</textarea>
+    <label class="upload-label" for="drill-answer-image">也可以添加答案图片</label>
+    <input id="drill-answer-image" type="file" accept="image/png,image/jpeg,image/webp" data-drill-ocr data-url="{{ url_for('drill_ocr', key=key) }}" data-token="{{ token(url_for('drill_ocr', key=key)) }}" data-target="drill-answer">
+    <button type="submit">提交答案</button>
+  </form>
+  {% endif %}
+  {% endif %}
 </div>
-<p class="hint">未判分题目暂存在当前 Web 进程，重启后需要重新 Prepare；已判分记录写入 SQLite。</p>
 {% endblock %}
