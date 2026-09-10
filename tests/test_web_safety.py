@@ -174,3 +174,19 @@ class WebRecoveryTests(unittest.TestCase):
         response = client.post('/record', data=dict(form['values'], question='题目', user_thoughts='没有思路'))
         self.assertEqual(response.status_code, 303)
         self.assertEqual(len(self.db.list_all_errors()), 2)
+
+    def test_failure_page_has_no_csp_violating_javascript_urls_and_preserves_draft(self):
+        page = self.client.get('/errors/999999')
+        self.assertEqual(page.status_code, 404)
+        self.assertNotIn(b'javascript:', page.data)
+        self.assertIn(b'data-back', page.data)
+
+        # 403 failure preserves submitted draft in read-only textareas
+        data = {'csrf': 'invalid_csrf', 'question': 'DRAFT_Q_123', 'user_thoughts': 'DRAFT_THOUGHTS_456'}
+        failed = self.client.post('/record', data=data)
+        self.assertEqual(failed.status_code, 403)
+        self.assertNotIn(b'javascript:', failed.data)
+        self.assertIn(b'data-back', failed.data)
+        self.assertIn(b'DRAFT_Q_123', failed.data)
+        self.assertIn(b'DRAFT_THOUGHTS_456', failed.data)
+        self.assertIn('草稿安全保留'.encode(), failed.data)

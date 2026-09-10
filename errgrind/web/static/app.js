@@ -7,11 +7,11 @@ const csrf = csrfMeta ? csrfMeta.content : '';
 let active = false;
 
 /* ==========================================================================
-   Math Rendering via KaTeX
+   Math Rendering via KaTeX (with race-condition and duplicate-render guards)
    ========================================================================== */
 function renderMath() {
-  document.querySelectorAll('[data-tex]').forEach(node => {
-    if (!window.katex) return;
+  if (!window.katex) return;
+  document.querySelectorAll('[data-tex]:not([data-rendered])').forEach(node => {
     try {
       katex.render(node.dataset.tex, node, {
         displayMode: node.classList.contains('math-display'),
@@ -20,15 +20,36 @@ function renderMath() {
         maxExpand: 1000,
         maxSize: 20,
       });
+      node.dataset.rendered = '1';
     } catch (_) {
       /* Escaped original TeX remains readable. */
     }
   });
 }
-renderMath();
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', renderMath);
+} else {
+  renderMath();
+}
+window.addEventListener('load', renderMath);
 
 /* ==========================================================================
-   Working State & Elapsed Time Tracker
+   Auto-scroll Dialogue to Latest Message
+   ========================================================================== */
+function scrollConversationsToBottom() {
+  document.querySelectorAll('.conversation').forEach(c => {
+    c.scrollTop = c.scrollHeight;
+  });
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', scrollConversationsToBottom);
+} else {
+  scrollConversationsToBottom();
+}
+
+/* ==========================================================================
+   Working State, Textarea Protection & Elapsed Time Tracker
    ========================================================================== */
 function begin(label) {
   active = true;
@@ -43,9 +64,15 @@ function begin(label) {
   };
   update();
   const interval = setInterval(update, 100);
+
   const controls = [...document.querySelectorAll('button, input[type=file]')];
   const wasDisabled = controls.map(c => c.disabled);
   controls.forEach(c => { c.disabled = true; });
+
+  const textareas = [...document.querySelectorAll('textarea')];
+  const wasReadOnly = textareas.map(t => t.readOnly);
+  textareas.forEach(t => { t.readOnly = true; });
+
   if (working) working.scrollIntoView({ block: 'nearest' });
 
   return {
@@ -53,6 +80,7 @@ function begin(label) {
     end() {
       clearInterval(interval);
       controls.forEach((c, i) => { c.disabled = wasDisabled[i]; });
+      textareas.forEach((t, i) => { t.readOnly = wasReadOnly[i]; });
       active = false;
       if (working) working.hidden = true;
     },
@@ -147,11 +175,24 @@ document.querySelectorAll('form[data-action]').forEach(form => {
 });
 
 /* ==========================================================================
-   OCR Upload Handling (File input & Drag-and-drop)
+   OCR Upload Handling (File input, Dropzone & Direct Textarea Drop)
    ========================================================================== */
 document.querySelectorAll('input[data-ocr-field]').forEach(input => {
+  const targetId = input.dataset.ocrField;
+  const target = document.getElementById(targetId);
+
   const handleFile = async (file) => {
     if (!file || active) return;
+
+    if (file.type && !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      showError('请选择有效的 PNG、JPEG 或 WebP 图片。');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      showError('上传图片过大，每张图片上限 20 MB。');
+      return;
+    }
+
     const data = new FormData();
     data.append('image', file);
     data.append('submit_token', input.dataset.token);
@@ -163,9 +204,8 @@ document.querySelectorAll('input[data-ocr-field]').forEach(input => {
         showError(result.error);
         return;
       }
-      const target = document.getElementById(input.dataset.ocrField);
       if (target) {
-        // Read the latest editor value: typing during OCR must not be overwritten.
+        // Read latest editor value: typing during OCR must not be overwritten.
         target.value += (target.value ? '\n\n' : '') + result.text;
         if (input.form && input.form.elements.ocr_used) {
           input.form.elements.ocr_used.value = '1';
@@ -186,7 +226,7 @@ document.querySelectorAll('input[data-ocr-field]').forEach(input => {
     }
   });
 
-  // Attach Drag & Drop support to the enclosing upload zone if present
+  // Attach Drag & Drop support to the upload zone (flicker-free)
   const zone = input.closest('.upload-zone');
   if (zone) {
     zone.addEventListener('dragover', (e) => {
@@ -194,13 +234,34 @@ document.querySelectorAll('input[data-ocr-field]').forEach(input => {
       zone.classList.add('dragover');
     });
     zone.addEventListener('dragleave', (e) => {
-      e.preventDefault();
+      if (zone.contains(e.relatedTarget)) return;
       zone.classList.remove('dragover');
     });
     zone.addEventListener('drop', (e) => {
       e.preventDefault();
       zone.classList.remove('dragover');
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  // Also allow dropping images directly onto the corresponding textarea
+  if (target) {
+    target.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        target.style.borderColor = 'var(--brand-600)';
+      }
+    });
+    target.addEventListener('dragleave', (e) => {
+      if (target.contains(e.relatedTarget)) return;
+      target.style.borderColor = '';
+    });
+    target.addEventListener('drop', (e) => {
+      target.style.borderColor = '';
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        e.preventDefault();
         handleFile(e.dataTransfer.files[0]);
       }
     });
@@ -213,41 +274,86 @@ document.querySelectorAll('input[data-ocr-field]').forEach(input => {
 document.querySelectorAll('textarea').forEach(textarea => {
   textarea.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      if (active) return;
       const form = textarea.closest('form');
-      if (form) {
-        event.preventDefault();
-        const submitBtn = form.querySelector('button[type=submit]');
-        if (submitBtn && !submitBtn.disabled) {
-          submitBtn.click();
-        } else if (!form.disabled) {
-          form.requestSubmit();
-        }
+      if (!form) return;
+      event.preventDefault();
+      const submitBtn = form.querySelector('button[type=submit], button:not([type])');
+      if (submitBtn) {
+        if (!submitBtn.disabled) submitBtn.click();
+      } else {
+        form.requestSubmit();
       }
     }
   });
 });
 
 /* ==========================================================================
-   Client-Side Filter Tabs for Errors List
+   Client-Side Filter Tabs & Stat Cards for Errors List
    ========================================================================== */
 const filterButtons = document.querySelectorAll('.filter-btn');
 if (filterButtons.length > 0) {
   const cards = document.querySelectorAll('.error-card, .error-row');
+  const emptyNotice = document.getElementById('filter-empty');
+
+  const applyFilter = (targetStatus) => {
+    filterButtons.forEach(btn => {
+      const match = (btn.dataset.filter === targetStatus) || (!targetStatus && btn.dataset.filter === 'all');
+      btn.classList.toggle('active', match);
+      btn.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+
+    let visibleCount = 0;
+    cards.forEach(card => {
+      if (!targetStatus || targetStatus === 'all' || card.dataset.status === targetStatus) {
+        card.style.display = '';
+        visibleCount++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    if (emptyNotice) {
+      emptyNotice.style.display = visibleCount === 0 ? '' : 'none';
+    }
+  };
+
   filterButtons.forEach(btn => {
     btn.addEventListener('click', () => {
-      filterButtons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const targetStatus = btn.dataset.filter;
-      cards.forEach(card => {
-        if (!targetStatus || targetStatus === 'all' || card.dataset.status === targetStatus) {
-          card.style.display = '';
-        } else {
-          card.style.display = 'none';
-        }
-      });
+      applyFilter(btn.dataset.filter);
     });
   });
+
+  // Connect stat cards to filter buttons
+  document.querySelectorAll('.stat-card[data-filter]').forEach(card => {
+    card.addEventListener('click', () => {
+      applyFilter(card.dataset.filter);
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        applyFilter(card.dataset.filter);
+      }
+    });
+  });
+
+  // Reset filter button inside empty state
+  const resetBtn = document.querySelector('[data-reset-filter]');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      applyFilter('all');
+    });
+  }
 }
+
+/* ==========================================================================
+   Safe Navigation Helpers (CSP Compliant Back Button)
+   ========================================================================== */
+document.querySelectorAll('[data-back]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    history.back();
+  });
+});
 
 /* ==========================================================================
    Page Lifecycle Guards

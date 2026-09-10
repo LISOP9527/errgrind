@@ -11,7 +11,7 @@
   </div>
 </div>
 
-{% set has_drafts = draft.get('question') or draft.get('user_thoughts') or draft.get('reference_answer') or draft.get('answer') %}
+{% set has_drafts = draft and (draft.get('question') or draft.get('user_thoughts') or draft.get('reference_answer') or draft.get('answer')) %}
 {% if has_drafts %}
 <div class="card" style="border-left: 4px solid var(--brand-500); margin-bottom: 1.5rem;">
   <div class="card-header">
@@ -36,8 +36,8 @@
 </div>
 {% endif %}
 
-<div style="display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem;">
-  <a href="javascript:history.back()" class="button">← 返回上一页重试</a>
+<div style="display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem; flex-wrap: wrap;">
+  <button type="button" class="button" data-back>← 返回上一页重试</button>
   <a href="{{ url_for('index') }}" class="button button-secondary">返回 Errors 查看已保存记录</a>
 </div>
 {% endblock %}

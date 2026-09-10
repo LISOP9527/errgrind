@@ -20,7 +20,7 @@
       <a href="{{ url_for('drill_new') }}" class="{% if request.endpoint in ('drill_new', 'drill_detail') %}active{% endif %}">Drill</a>
     </nav>
     <p class="model" title="当前模型提供方与参数设置">
-      <span class="model-dot" aria-hidden="true"></span>
+      <span class="model-dot {% if not configured %}unconfigured{% endif %}" aria-hidden="true"></span>
       {{ model_info.provider }} · {{ model_info.model }} · effort: {{ model_info.reasoning_effort }}
     </p>
   </div>

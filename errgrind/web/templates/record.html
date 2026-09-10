@@ -26,8 +26,8 @@
       </label>
       <span class="phase">必填</span>
     </div>
-    <p class="hint" style="margin-bottom: 0.75rem;">粘贴数学题目文本，支持 LaTeX 公式（如 <code>$x^2 + y^2 = 1$</code>）。</p>
-    <textarea id="question" name="question" required rows="5" placeholder="请输入数学错题题目..."></textarea>
+    <p class="hint" style="margin-bottom: 0.75rem;">粘贴数学题目文本，支持 LaTeX 公式（如 <code>$x^2 + y^2 = 1$</code>），支持拖拽图片到输入框自动识别。</p>
+    <textarea id="question" name="question" required rows="5" placeholder="请输入数学错题题目，可直接粘贴文本或将题目图片拖放到此输入框..."></textarea>
 
     <div class="upload-zone">
       <label class="upload-label" for="image-question">
@@ -35,7 +35,7 @@
         <span>添加题目图片进行 OCR 识别</span>
       </label>
       <input id="image-question" type="file" accept="image/png,image/jpeg,image/webp" data-ocr-field="question" data-url="{{ url_for('record_ocr', field='question') }}" data-token="{{ token(url_for('record_ocr', field='question')) }}">
-      <span class="upload-hint">限 PNG / JPEG / WebP，≤ 20 MB；识别后追加到上方</span>
+      <span class="upload-hint">支持点击选择或直接拖拽图片；限 PNG / JPEG / WebP，≤ 20 MB</span>
     </div>
   </div>
 
@@ -53,7 +53,7 @@
         确实没有思路时，可以填写<strong>“没有思路”</strong>；不记得的地方可以直接说明。
       </p>
     </div>
-    <textarea id="user_thoughts" name="user_thoughts" required rows="5" placeholder="回忆当时的解题过程、尝试的方向或卡住的地方..."></textarea>
+    <textarea id="user_thoughts" name="user_thoughts" required rows="5" placeholder="回忆当时的解题过程、尝试的方向或卡住的地方（支持手写草稿图片拖放到此框）..."></textarea>
 
     <div class="upload-zone">
       <label class="upload-label" for="image-user_thoughts">
@@ -74,7 +74,7 @@
       <span class="phase">选填</span>
     </div>
     <p class="hint" style="margin-bottom: 0.75rem;">标准答案或解析（可留空）。在随后的 Grill 诊断中将默认折叠隐藏，避免干扰诊断过程。</p>
-    <textarea id="reference_answer" name="reference_answer" rows="4" placeholder="如有标准答案或解析可填入此处（可选）..."></textarea>
+    <textarea id="reference_answer" name="reference_answer" rows="4" placeholder="如有标准答案或解析可填入此处（可选，亦支持图片拖放识别）..."></textarea>
 
     <div class="upload-zone">
       <label class="upload-label" for="image-reference_answer">
