@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import record_composer with context %}
+{% block title %}ErrGrind{% endblock %}
+{% block content %}
+<section class="empty-workspace" aria-label="New error">
+  <div class="empty-prompt">
+    <h1>What’s your error?</h1>
+    <p>写下发生了什么。你可以先说一段自然的话，之后再校对整理结果。</p>
+  </div>
+  {{ record_composer('home-record-form', 'home-record', 'home-record-preview') }}
+</section>
+{% endblock %}

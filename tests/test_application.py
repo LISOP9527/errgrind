@@ -13,6 +13,7 @@ from errgrind.application import (
     InvalidWorkflowState,
     OutputContractError,
     WorkflowModelError,
+    next_step_for_error,
 )
 from errgrind.db.ops import Database
 from errgrind.application.grill_diagnosis import empty_diagnostic_state
@@ -291,3 +292,17 @@ class ApplicationBoundaryTests(unittest.TestCase):
         public_records = app.list_errors()
         self.assertEqual(len(public_records), 1)
         self.assertIsNone(public_records[0].grilling_diagnostic_state)
+
+    def test_next_step_codes_follow_recoverable_error_state(self):
+        fresh = self.db.create_error("新题")
+        self.assertEqual(next_step_for_error(self.db.get_error(fresh)).code, "start_grill")
+
+        partial = self.db.create_error("中断题")
+        self.db.save_grilling_progress(partial, "[{\"role\":\"user\",\"content\":\"回答\"}]", None)
+        self.assertEqual(next_step_for_error(self.db.get_error(partial)).code, "resume_grill")
+
+        finished = self.db.create_error("已诊断题")
+        self.db.update_grilling(finished, "[]", "摘要")
+        self.assertEqual(next_step_for_error(self.db.get_error(finished)).code, "start_teach")
+        self.db.update_teach(finished, "[]")
+        self.assertEqual(next_step_for_error(self.db.get_error(finished)).code, "start_drill")

@@ -47,6 +47,33 @@ class GrillState(str, Enum):
     PAUSED = "paused"
 
 
+@dataclass(frozen=True)
+class NextStep:
+    """A stable application-level recommendation code for a current Error."""
+
+    code: str
+
+
+def next_step_for_error(error: ErrorRecord) -> NextStep:
+    """Choose the deterministic next action without exposing storage states."""
+    if error.status == "pending-grill":
+        conversation = error.grilling_conversation
+        has_conversation = bool(conversation and conversation.strip())
+        if has_conversation:
+            try:
+                import json
+                has_conversation = bool(json.loads(conversation))
+            except (TypeError, ValueError):
+                # Preserve recoverability for an old/non-JSON partial record.
+                has_conversation = True
+        return NextStep(
+            "resume_grill" if has_conversation else "start_grill"
+        )
+    if error.status == "pending-teach":
+        return NextStep("start_teach")
+    return NextStep("start_drill")
+
+
 class DrillStage(str, Enum):
     SPEC = "spec"
     DRAFT = "draft"
@@ -74,6 +101,16 @@ class DrillPreparation:
     drill_spec: dict[str, Any]
     question: str
     reference_answer: str
+
+
+@dataclass(frozen=True)
+class RecordDraft:
+    """User-reviewable structure extracted from a raw record submission."""
+
+    question: str
+    user_thoughts: str
+    reference_answer: str
+    origin: str
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = ["Flask>=3.1,<4", "waitress>=3,<4", "markdown-it-py>=3,<5", "mdit-py-plugins>=0.4,<1"]
 # The SDK pins a platform-specific Codex runtime.  Keep it optional so an
 # unsupported runtime wheel does not prevent Gemini/DeepSeek/OpenCode users
 # from installing ErrGrind at all.  install.sh enables this extra whenever the
@@ -26,3 +27,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools.package-data]
+"errgrind.web" = ["templates/*.html", "static/*.css", "static/*.js", "static/vendor/*", "static/vendor/fonts/*"]

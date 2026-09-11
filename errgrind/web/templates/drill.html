@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import credentials with context %}
+{% block title %}Drill{% endblock %}
+{% block content %}
+<section class="workspace-view drill-workspace" data-drill-key="{{ key }}" data-status-url="{{ url_for('drill_status', key=key) }}">
+  {% if not question %}
+  <div class="drill-start" aria-live="polite">
+    <h1>Drill</h1>
+    {% if state == 'preparing' %}
+      <p>正在准备一道题，请稍候。</p>
+    {% elif state == 'failed' %}
+      <p>这次准备没有完成。可以保留当前页面，稍后再试。</p>
+      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action>{{ credentials(url_for('drill_prepare', key=key)) }}<button type="submit">再试一次</button></form>
+    {% else %}
+      <p>正在准备一道新的数学题……</p>
+      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-auto-prepare>{{ credentials(url_for('drill_prepare', key=key)) }}<button class="text-action" type="submit">开始</button></form>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="drill-question"><div class="markdown">{{ md(question) }}</div></div>
+  {% if result %}
+  <section class="verdict {% if result.is_correct %}correct{% else %}incorrect{% endif %}" aria-live="polite">
+    <strong class="verdict-title">{{ '正确' if result.is_correct else '错误' }}</strong>
+    {% if result.is_correct %}
+    <p>这次练习完成了。</p>
+    <div class="inline-actions"><a class="text-button" href="{{ url_for('drill_new') }}">再做一道 <span aria-hidden="true">→</span></a><a class="text-button muted-button" href="{{ url_for('index') }}">返回</a></div>
+    {% else %}
+    <p>这次回答已经记录，可以继续查看由此产生的 Error。</p>
+    <a class="text-button" href="{{ url_for('error_detail', error_id=result.derived_error_id) if result.derived_error_id else url_for('index') }}">继续查看这道 Error <span aria-hidden="true">→</span></a>
+    {% endif %}
+  </section>
+  {% else %}
+  <form class="chat-composer answer-composer" method="post" action="{{ url_for('drill_judge', key=key) }}" data-action data-draft-key="drill-{{ key }}">
+    {{ credentials(url_for('drill_judge', key=key)) }}
+    <label class="visually-hidden" for="drill-answer">你的答案</label>
+    <div class="composer-shell"><textarea id="drill-answer" name="answer" required rows="3" placeholder="写下你的答案或推理过程……">{{ answer }}</textarea><div class="composer-toolbar"><label class="attach-button" for="drill-answer-image" title="添加答案图片" aria-label="添加答案图片"><span aria-hidden="true">+</span><span class="attach-label">图片</span><input id="drill-answer-image" class="file-input" type="file" accept="image/png,image/jpeg,image/webp" data-drill-ocr data-url="{{ url_for('drill_ocr', key=key) }}" data-token="{{ token(url_for('drill_ocr', key=key)) }}" data-target="drill-answer"></label><span class="composer-note">可以附上草稿图片</span><button class="send-button" type="submit" aria-label="提交答案" title="提交答案">↑</button></div></div>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}
