@@ -3,11 +3,15 @@
 import hashlib
 import json
 import re
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ..llm.usage import usage_action, usage_scope
+from ..llm.messages import ImagePart, MultimodalMessage
+from ..llm.ocr import OcrError
 
+from .attachments import attachment_tuples, image_parts_from_paths
 from .contracts import (
     DrillJudgment,
     DrillPreparation,
@@ -272,8 +276,27 @@ class DrillWorkflow:
 
     @usage_action("drill", "judge")
     def judge_and_record(
-        self, preparation: DrillPreparation, user_response: str
+        self,
+        preparation: DrillPreparation,
+        user_response: str,
+        *,
+        image_paths: list[str] | None = None,
+        pending_key: str | None = None,
     ) -> DrillJudgment:
+        try:
+            images = list(image_parts_from_paths(image_paths or []))
+        except OcrError as exc:
+            raise OutputContractError(str(exc)) from exc
+        pending_key = pending_key or uuid.uuid4().hex
+        if images:
+            self.db.save_pending_attachments(pending_key, attachment_tuples(images))
+        else:
+            images = [
+                ImagePart(item.mime_type, item.data)
+                for item in self.db.list_pending_attachments(pending_key)
+            ]
+        if not user_response.strip() and not images:
+            raise OutputContractError("答案不能为空；请输入文字或添加图片")
         template = self.prompts.load("judge.md")
         prompt = template.format(
             question=preparation.question,
@@ -284,8 +307,13 @@ class DrillWorkflow:
         )
         try:
             with usage_scope(error_id=preparation.source_error_id):
+                message = (
+                    MultimodalMessage("user", prompt, tuple(images))
+                    if images
+                    else {"role": "user", "content": prompt}
+                )
                 judgment = self.llm.chat_json(
-                    [{"role": "user", "content": prompt}], output_schema=JUDGE_SCHEMA
+                    [message], output_schema=JUDGE_SCHEMA
                 )
         except Exception as exc:
             raise WorkflowModelError(f"判分失败: {exc}") from exc
@@ -313,6 +341,7 @@ class DrillWorkflow:
                 judge_model=self.cfg.get("model") or "unknown",
                 judge_prompt_sha256=hashlib.sha256(template.encode("utf-8")).hexdigest(),
                 judge_schema_sha256=hashlib.sha256(canonical_schema.encode("utf-8")).hexdigest(),
+                pending_key=pending_key,
             )
         except Exception as exc:
             raise WorkflowPersistenceError(f"保存演练结果失败: {exc}") from exc

@@ -9,13 +9,14 @@
 - [核心原则](core-principles.md)：ErrGrind 如何围绕 Evidence、可更新 State、Policy 和减少未来 Error 设计。
 - [Pattern State 演进提案](pattern-state-proposal.md)：从单次 Grill 假设逐步建立可审查、可证伪的 Pattern State，区分真实 Evidence 与干预结果。
 - [“减少未来 Error”的验证策略](evaluation-strategy.md)：区分流程、模型、行为迁移和真实结果，说明 recurrence、盲法关联与学习机会分母。
-- [架构解耦原则](ui-decoupling.md)：从 TUI 演进到 GUI / Mobile 时必须遵守的 Core/UI 边界。
-- [错题录入与图片输入](record-input.md)：三个录题字段分别支持文字与图片，校对后保存为同一条 Error。
+- [架构解耦原则](ui-decoupling.md)：Core/UI 边界与本机 thin Web adapter；[WebUI 安装与使用](../README.md)。
+- [错题录入与图片输入](record-input.md)：文字与图片直接进入同一轮多模态整理，校对后保存为同一条 Error。
 
 ## 决策记录
 
+- [Web Settings 编辑共享配置](decisions/2026-09-14-web-settings.md)：在 WebUI 调整 Provider、模型、Codex effort 与工作流参数，安全保存共享配置。
 - [Drill 目标查询与判题结果展示](decisions/2026-09-08-drill-target-query-and-verdict.md)：按需查询历史题目的目标机制，判题后仅展示对错。
-- [Drill 答题图片输入](decisions/2026-09-08-drill-answer-ocr.md)：答案图片转录后追加到可编辑草稿，确认后才判分。
+- [Drill 答题图片输入](decisions/2026-09-08-drill-answer-ocr.md)：历史 OCR 方案；Web 路径已由直接多模态附件决策 supersede，CLI 兼容能力可暂留。
 - [决策索引](decisions/README.md)：记录已经做出的设计决策、原因和影响。
 - [Grill 与 Teach 会话生命周期](decisions/2026-07-27-conversation-lifecycle.md)：完成的 Grill 只读，Teach 持续追加。
 - [终端内容渲染边界](decisions/2026-07-27-terminal-content-rendering.md)：标准 Markdown + LaTeX 保持在数据层，终端统一在 UI 边界降级渲染。
@@ -23,8 +24,11 @@
 - [模型用量日志](decisions/2026-09-08-model-usage-logging.md)：记录各阶段服务端 token usage、修复与失败，先测量再优化。
 - [Codex OAuth 生成直连 Responses](decisions/2026-09-07-codex-direct-responses.md)：生成与模型目录直连，隔离 Prompt；官方 SDK 仅保留登录与刷新。
 - [原 Codex app-server 接入决策](decisions/2026-08-29-codex-app-server-provider.md)：历史方案；生成和凭据读取边界已由直连决策替代。
-- [OCR 作为需人工校对的录题入口](decisions/2026-08-31-ocr-as-reviewed-input.md)：provider 负责图片转录，用户确认后的文本才进入现有 Error 工作流。
-- [在录题字段内整合图片识别](decisions/2026-09-06-record-field-image-input.md)：将选图和 OCR 整合进 `/record` 各字段，支持题目、思路与答案分离截图。
+- [OCR 作为需人工校对的录题入口](decisions/2026-08-31-ocr-as-reviewed-input.md)：历史 OCR 方案；Web 路径已 supersede，CLI `/ocr` 兼容性仍可保留。
+- [在录题字段内整合图片识别](decisions/2026-09-06-record-field-image-input.md)：历史 Web 字段 OCR 方案，已由直接多模态附件决策 supersede。
+- [直接多模态 Web 输入](decisions/2026-09-11-direct-multimodal-web-input.md)：Web 的 Record、Error 对话和 Drill 直接发送图片；SQLite 保存附件 provenance 与恢复所需的字节。
+- [assistant-ui conversation workspace spike](decisions/2026-09-14-assistant-ui-spike.md)：用 ExternalStoreRuntime 验证可替换的对话 UI 基础设施，并记录当前 Record 字段级图片语义的持久化限制。
+- [React + assistant-ui WebUI 正式迁移](decisions/2026-09-14-assistant-ui-migration.md)：将 React 工作区接入单端口生产服务，保留 Flask/Application/SQLite 业务权威和原始附件限制。
 - [Evidence 来源与 Drill Action Ledger](decisions/2026-09-01-evidence-provenance-drill-ledger.md)：记录 Error 来源、Drill 判分与衍生 Error 的可追溯关系。
 - [暂缓 Pattern Observation 校验](decisions/2026-09-02-defer-pattern-observation-validation.md)：当前 MVP 直接使用 `grilling_summary`，暂不引入结构化 Observation 与 Evidence 校验。
 - [Application 工作流边界](decisions/2026-09-03-application-workflow-boundary.md)：Grill、Teach、Drill 通过 UI 无关 façade 供未来前端复用。

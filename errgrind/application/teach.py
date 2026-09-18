@@ -4,11 +4,14 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 from ..llm.usage import usage_action
+from ..llm.ocr import OcrError
 
+from .attachments import attachment_tuples, hydrate_messages, image_parts_from_paths
 from .contracts import (
     ConversationResult,
     ErrorNotFound,
     InvalidWorkflowState,
+    OutputContractError,
     WorkflowModelError,
     public_error,
 )
@@ -72,6 +75,7 @@ class TeachWorkflow:
         error_id: int,
         answer: str,
         *,
+        image_paths: list[str] | None = None,
         before_model_call: Callable[[], None] | None = None,
     ) -> ConversationResult:
         error = self._error(error_id)
@@ -82,8 +86,14 @@ class TeachWorkflow:
             raise InvalidWorkflowState("Teach 尚未开始，请先开始或恢复 Teach")
         if messages[-1]["role"] != "assistant":
             raise InvalidWorkflowState("当前正在等待 Teach 的模型回复")
+        try:
+            images = image_parts_from_paths(image_paths or [])
+        except OcrError as exc:
+            raise OutputContractError(str(exc)) from exc
+        if not answer.strip() and not images:
+            raise InvalidWorkflowState("Teach 回答不能为空；可以输入文字或添加图片。")
         messages.append({"role": "user", "content": answer})
-        self._save(error_id, messages)
+        self._save(error_id, messages, attachments=attachment_tuples(images))
         return self._respond(
             error_id,
             messages,
@@ -107,7 +117,9 @@ class TeachWorkflow:
         if before_model_call is not None:
             before_model_call()
         try:
-            response = self.llm.chat(messages)
+            response = self.llm.chat(
+                hydrate_messages(self.db, messages, error_id=error_id)
+            )
         except Exception as exc:
             self._save(error_id, messages)
             raise WorkflowModelError(f"API 错误: {exc}") from exc
@@ -115,8 +127,14 @@ class TeachWorkflow:
         self._save(error_id, messages)
         return ConversationResult(public_error(self._error(error_id)), messages, response, resumed)
 
-    def _save(self, error_id, messages):
-        self.db.save_teach_conversation(error_id, json.dumps(messages, ensure_ascii=False))
+    def _save(self, error_id, messages, *, attachments=()):
+        attachment_ids = self.db.save_teach_conversation(
+            error_id,
+            json.dumps(messages, ensure_ascii=False),
+            attachments=attachments,
+        )
+        if attachment_ids:
+            messages[-1]["attachments"] = attachment_ids
 
     def _error(self, error_id):
         error = self.db.get_error(error_id)

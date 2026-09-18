@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import credentials with context %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<section class="workspace-view config-workspace">
+  <div class="page-heading">
+    <h1>Settings</h1>
+    <p>调整模型服务、提供商及运行参数。</p>
+  </div>
+
+  <form id="config-form" class="config-form" method="post" action="{{ url_for('config_save') }}">
+    {{ credentials(url_for('config_save')) }}
+
+    <div class="field" data-config-row="provider">
+      <label for="config-provider">提供商 (Provider)</label>
+      <select id="config-provider" name="provider">
+        <option value="gemini" data-default-model="{{ provider_models.gemini }}" {% if settings.provider == 'gemini' %}selected{% endif %}>Gemini</option>
+        <option value="deepseek" data-default-model="{{ provider_models.deepseek }}" {% if settings.provider == 'deepseek' %}selected{% endif %}>DeepSeek</option>
+        <option value="opencode" data-default-model="{{ provider_models.opencode }}" data-default-base-url="{{ opencode_base_url }}" {% if settings.provider == 'opencode' %}selected{% endif %}>OpenCode</option>
+        <option value="codex" data-default-model="{{ provider_models.codex }}" {% if settings.provider == 'codex' %}selected{% endif %}>Codex</option>
+      </select>
+      <p class="hint">选择用于诊断和练习生成的 AI 服务提供商。</p>
+    </div>
+
+    <div class="field" data-config-row="model">
+      <label for="config-model">模型 (Model)</label>
+      <input id="config-model" type="text" name="model" value="{{ settings.model }}" placeholder="{{ provider_models.get(settings.provider, '') }}" required>
+      <p class="hint">指定调用的模型名称。切换提供商时会自动填入该提供商的默认模型。</p>
+    </div>
+
+    <div class="field" data-config-row="reasoning_effort">
+      <label for="config-reasoning-effort">推理深度 (Reasoning effort)</label>
+      <select id="config-reasoning-effort" name="reasoning_effort">
+        <option value="" {% if not settings.reasoning_effort %}selected{% endif %}>默认 (Default)</option>
+        <option value="low" {% if settings.reasoning_effort == 'low' %}selected{% endif %}>low</option>
+        <option value="medium" {% if settings.reasoning_effort == 'medium' %}selected{% endif %}>medium</option>
+        <option value="high" {% if settings.reasoning_effort == 'high' %}selected{% endif %}>high</option>
+        <option value="xhigh" {% if settings.reasoning_effort == 'xhigh' %}selected{% endif %}>xhigh</option>
+        <option value="max" {% if settings.reasoning_effort == 'max' %}selected{% endif %}>max</option>
+        <option value="ultra" {% if settings.reasoning_effort == 'ultra' %}selected{% endif %}>ultra</option>
+      </select>
+      <p class="hint">仅适用于 Codex 提供商，用于控制思考与推理深度。</p>
+    </div>
+
+    <div class="field" data-config-row="api_key">
+      <label for="config-api-key">API Key</label>
+      <div class="api-key-input-wrap">
+        <input id="config-api-key" type="password" name="api_key" value="" autocomplete="new-password" placeholder="{% if api_key_set %}已配置 API Key（留空保持不变）{% else %}输入 API Key{% endif %}">
+      </div>
+      <div class="api-key-status" data-config-key-status>
+        {% if api_key_set %}
+          <span class="key-status-indicator is-set">当前提供商已配置 API Key</span>
+        {% else %}
+          <span class="key-status-indicator is-unset">当前提供商未配置 API Key</span>
+        {% endif %}
+      </div>
+      <div class="checkbox-option" data-config-row="clear_api_key">
+        <label class="checkbox-label" for="config-clear-api-key">
+          <input type="checkbox" id="config-clear-api-key" name="clear_api_key" value="1">
+          <span>清除当前已保存的 API Key</span>
+        </label>
+      </div>
+      <p class="hint" data-config-hint="api_key">留空保存将保持当前提供商已有 Key；若切换提供商，必须输入新提供商的 API Key。</p>
+      <p class="hint codex-terminal-hint" data-config-hint="codex" hidden>Codex 提供商通过终端 <code>errgrind</code> CLI 认证与登录，无需在此输入 API Key。</p>
+    </div>
+
+    <div class="field" data-config-row="base_url">
+      <label for="config-base-url">API 地址 (Base URL)</label>
+      <input id="config-base-url" type="text" name="base_url" value="{{ settings.base_url|default('', true) }}" placeholder="{{ opencode_base_url|default('http://localhost:8080/v1') }}" data-default-base-url="{{ opencode_base_url|default('http://localhost:8080/v1') }}" autocomplete="off">
+      <p class="hint">仅适用于 OpenCode 提供商。填写兼容接口的服务基础地址（如 <code>{{ opencode_base_url }}</code>）。</p>
+    </div>
+
+    <div class="field" data-config-row="drill_context_n">
+      <label for="config-drill-context-n">Drill 上下文条数 (drill_context_n)</label>
+      <input id="config-drill-context-n" type="number" name="drill_context_n" value="{{ settings.drill_context_n }}" min="1" step="1" required>
+      <p class="hint">生成 Drill 练习时最多参考的历史诊断 Error 条数（至少为 1，默认 10）。</p>
+    </div>
+
+    <div class="field" data-config-row="grill_max_turns">
+      <label for="config-grill-max-turns">Grill 最大追问轮数 (grill_max_turns)</label>
+      <input id="config-grill-max-turns" type="number" name="grill_max_turns" value="{{ settings.grill_max_turns }}" min="1" step="1" required>
+      <p class="hint">单次 Grill 诊断对话的最大交互轮数上限（至少为 1，默认 30）。</p>
+    </div>
+
+    {% if form_error %}
+    <div class="notice error config-form-error" role="alert">{{ form_error }}</div>
+    {% endif %}
+
+    <div class="actions config-actions">
+      <button type="submit" class="button" id="config-save-btn">保存设置</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

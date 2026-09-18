@@ -705,7 +705,7 @@ class StructuredGrillWorkflowTests(unittest.TestCase):
         self.assertEqual(migrated.get_error(1).grilling_summary, "旧摘要")
         self.assertIsNone(migrated.get_error(1).grilling_diagnostic_state)
         self.assertEqual(
-            migrated.conn.execute("PRAGMA user_version").fetchone()[0], 3
+            migrated.conn.execute("PRAGMA user_version").fetchone()[0], 6
         )
     def test_cli_pauses_instead_of_crashing_on_output_contract_error(self):
         error_id = self.db.create_error("题目", "我直接套了公式")

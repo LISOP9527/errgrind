@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import tempfile
 
 
 CONFIG_DIR = os.path.expanduser("~/.config/errgrind")
@@ -59,6 +60,16 @@ def load() -> dict:
 
 
 def save(cfg: dict):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    directory = os.path.dirname(CONFIG_PATH)
+    os.makedirs(directory, exist_ok=True)
+    temporary = None
+    try:
+        fd, temporary = tempfile.mkstemp(prefix=".config-", suffix=".json", dir=directory)
+        with os.fdopen(fd, "w") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, CONFIG_PATH)
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            os.unlink(temporary)

@@ -7,7 +7,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..llm.usage import usage_action, usage_scope
+from ..llm.ocr import OcrError
 
+from .attachments import attachment_tuples, hydrate_messages, image_parts_from_paths
 from .contracts import (
     ErrorNotFound,
     GrillResult,
@@ -46,7 +48,7 @@ def grilling_summary(response: str) -> str:
     return response.strip()[: -len(GRILLING_END)].strip()
 
 
-def _load_messages(raw: Optional[str]) -> list[dict[str, str]]:
+def _load_messages(raw: Optional[str]) -> list[dict]:
     try:
         messages = json.loads(raw or "[]")
     except (json.JSONDecodeError, TypeError) as exc:
@@ -129,6 +131,14 @@ class GrillWorkflow:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": "开始吧"},
             ]
+            initial_attachment_ids = [
+                item.id
+                for item in self.db.list_error_attachments(
+                    error_id, conversation_kind="initial"
+                )
+            ]
+            if initial_attachment_ids:
+                messages[-1]["attachments"] = initial_attachment_ids
             # Bootstrap is a recoverable fact even if the first model call fails.
             self._save(error_id, messages, diagnostic_state)
 
@@ -158,6 +168,7 @@ class GrillWorkflow:
         error_id: int,
         answer: str,
         *,
+        image_paths: Optional[list[str]] = None,
         on_token: Optional[Callable[[str], None]] = None,
     ) -> GrillResult:
         error = self._error(error_id)
@@ -168,7 +179,11 @@ class GrillWorkflow:
             raise InvalidWorkflowState("Grill 尚未开始，请先开始或恢复 Grill")
         if messages[-1].get("role") != "assistant":
             raise InvalidWorkflowState("当前正在等待 Grill 的模型回复")
-        if not answer.strip():
+        try:
+            images = image_parts_from_paths(image_paths or [])
+        except OcrError as exc:
+            raise OutputContractError(str(exc)) from exc
+        if not answer.strip() and not images:
             raise InvalidWorkflowState("Grill 回答不能为空；如果不记得，可以直接输入“不记得”。")
         diagnostic_state_json = error.grilling_diagnostic_state
         diagnostic_state = load_diagnostic_state(diagnostic_state_json)
@@ -179,6 +194,7 @@ class GrillWorkflow:
             messages,
             diagnostic_state,
             diagnostic_state_json=diagnostic_state_json,
+            attachments=attachment_tuples(images),
         )
         return self._respond(
             error_id,
@@ -309,6 +325,8 @@ class GrillWorkflow:
                 ),
             },
         ]
+        call_messages = hydrate_messages(self.db, call_messages, error_id=error.id)
+        attachment_refs = self._attachment_refs(error.id, messages)
         try:
             raw = self._chat_json(call_messages)
         except _MalformedStructuredResponse as exc:
@@ -324,6 +342,7 @@ class GrillWorkflow:
                     messages,
                     initial_user_thoughts=error.user_thoughts,
                     require_latest_user_evidence=require_latest_user_evidence,
+                    attachment_refs=attachment_refs,
                 )
             except OutputContractError as exc:
                 first_error = exc
@@ -359,6 +378,7 @@ class GrillWorkflow:
                 messages,
                 initial_user_thoughts=error.user_thoughts,
                 require_latest_user_evidence=require_latest_user_evidence,
+                attachment_refs=attachment_refs,
             )
         except OutputContractError:
             # Semantic errors may also contain model-controlled field names.
@@ -366,7 +386,7 @@ class GrillWorkflow:
                 "Grill 输出契约修复失败：字段或证据不符合要求，请稍后恢复诊断。"
             ) from None
 
-    def _chat_json(self, messages: list[dict[str, str]]):
+    def _chat_json(self, messages: list):
         try:
             return self.llm.chat_json(
                 messages,
@@ -387,8 +407,7 @@ class GrillWorkflow:
         except (TypeError, ValueError):
             return repr(raw)
 
-    @staticmethod
-    def _diagnostic_context(error, messages, diagnostic_state) -> str:
+    def _diagnostic_context(self, error, messages, diagnostic_state) -> str:
         addressable = []
         if error.user_thoughts:
             addressable.append(
@@ -401,6 +420,20 @@ class GrillWorkflow:
                 and not _is_bootstrap_user_message(messages, index)
             ):
                 addressable.append(f"message:{index}:\n{message['content']}")
+            if (
+                message.get("role") == "user"
+                and not _is_bootstrap_user_message(messages, index)
+            ):
+                for attachment_id in message.get("attachments", []):
+                    addressable.append(
+                        f"message:{index}:attachment:{attachment_id}: "
+                        "[用户图片附件；没有可引用的模型转录文字]"
+                    )
+        for attachment in self._initial_attachments(error.id):
+            addressable.append(
+                f"initial_attachment:{attachment.id}: "
+                "[用户图片附件；没有可引用的模型转录文字]"
+            )
         evidence_text = "\n\n".join(addressable) or "（当前没有可引用的用户原话）"
         state_text = json.dumps(
             diagnostic_state, ensure_ascii=False, indent=2
@@ -412,8 +445,28 @@ class GrillWorkflow:
             + evidence_text
             + "\n\n[Protocol]\n"
             "只允许引用上面列出的 source_ref。当前 state 是事实来源；"
+            "文字 Evidence 的 quote 必须是原文精确 substring；图片 Evidence 使用附件 source_ref，"
+            "quote 必须为空，不得把模型视觉理解伪装成用户原话。"
             "不得重写旧 hypothesis claim、旧 Evidence 或旧 Probe；本轮只输出 delta。"
         )
+
+    def _initial_attachments(self, error_id: int):
+        return self.db.list_error_attachments(
+            error_id, conversation_kind="initial"
+        )
+
+    def _attachment_refs(self, error_id: int, messages) -> set[str]:
+        refs = {
+            f"initial_attachment:{item.id}" for item in self._initial_attachments(error_id)
+        }
+        for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                continue
+            if _is_bootstrap_user_message(messages, index):
+                continue
+            for attachment_id in message.get("attachments", []):
+                refs.add(f"message:{index}:attachment:{attachment_id}")
+        return refs
 
     def _respond_legacy(
         self,
@@ -425,10 +478,11 @@ class GrillWorkflow:
     ) -> GrillResult:
         try:
             stream_chat = getattr(self.llm, "stream_chat", None)
+            model_messages = hydrate_messages(self.db, messages, error_id=error_id)
             if callable(stream_chat):
-                response = stream_chat(messages, on_token or (lambda _token: None))
+                response = stream_chat(model_messages, on_token or (lambda _token: None))
             else:
-                response = self.llm.chat(messages)
+                response = self.llm.chat(model_messages)
         except Exception as exc:
             self._save_existing_conversation(error_id, messages)
             raise WorkflowModelError(f"API 错误: {exc}") from exc
@@ -468,15 +522,19 @@ class GrillWorkflow:
         diagnostic_state: dict[str, Any] | None,
         *,
         diagnostic_state_json: str | None = None,
+        attachments=(),
     ) -> None:
         try:
-            self.db.save_grilling_progress(
+            attachment_ids = self.db.save_grilling_progress(
                 error_id,
                 json.dumps(messages, ensure_ascii=False),
                 diagnostic_state_json
                 if diagnostic_state_json is not None
                 else _json_state(diagnostic_state),
+                attachments=attachments,
             )
+            if attachment_ids:
+                messages[-1]["attachments"] = attachment_ids
         except Exception as exc:
             raise WorkflowPersistenceError(f"保存 Grill 对话失败: {exc}") from exc
 

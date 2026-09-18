@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}操作未完成{% endblock %}
+{% block content %}
+<section class="failure-workspace">
+  <h1>这次操作没有完成</h1>
+  <p class="lead">请保留下面的草稿，返回后可以重新打开记录或稍后再试。</p>
+  {% set safe_draft = draft|default({}, true) %}
+  {% for name, label in [('raw_input','原始内容'),('question','题目'),('user_thoughts','当时的思路'),('reference_answer','参考答案'),('answer','答案')] %}
+    {% if safe_draft.get(name) %}<label>{{ label }}（草稿）</label><textarea readonly>{{ safe_draft[name] }}</textarea>{% endif %}
+  {% endfor %}
+  <a class="text-button" href="{{ return_url|default(url_for('index')) }}">返回工作区 <span aria-hidden="true">→</span></a>
+</section>
+{% endblock %}

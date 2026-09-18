@@ -149,6 +149,34 @@ Application/core 继续作为业务规则的统一权威边界，SQLite 中的 E
 旧决策中的“本次不实现 MCP”描述当时范围；这里把 MCP 排入 V1 Product，并不表示已经实现，
 也不要求引入复杂 Policy 或 dedicated harness。GUI / Mobile 的既有解耦方向继续有效，本文不另作 Mobile 发版承诺。
 
+### UI infrastructure 与复用策略
+
+V1 第一版继续完成当前 thin WebUI，不为了“发现了更成熟的聊天 UI 框架”而在临近可用时整体重写。
+当前 WebUI 已经承担了真实 Error workspace、Grill / Teach timeline、Drill、输入恢复、安全边界和移动端适配；
+在核心交互仍快速变化时切换 frontend stack，会把产品验证重新变成迁移工程。
+
+但当前实现不应被理解为长期承诺“所有 Web primitive 都自己维护”。这次 WebUI 设计暴露出的经验是：
+
+```text
+ErrGrind-specific information architecture / domain interaction
+    → 自己设计并保持权威
+
+chat composer / attachments / scrolling / streaming / message rendering / mobile primitives
+    → 优先评估成熟 library / framework / component
+```
+
+因此，当 V1 之后继续增加 richer multimodal attachment、streaming、消息编辑、thread 管理、复杂 mobile interaction
+或其他通用 conversational UI 能力时，在继续扩大自制 Jinja/JS/CSS 之前，应先评估成熟的 conversational UI primitives。
+优先考虑能够接入自有 backend、允许保留 ErrGrind 信息架构和对象模型的组件型方案；对已经自带完整 chat / agent / memory / knowledge
+产品 ontology 的完整应用框架要更谨慎，因为隐藏或改写其既有产品结构可能比复用组件更昂贵。
+
+选择“继续当前实现 / 引入 library / fork / 重写”时比较的是未来总维护成本，而不是单看现成方案功能多少。
+至少评估：集成与迁移成本、额外 toolchain、依赖与安全面、测试重写、运行资源、升级路径、退出成本，以及它是否迫使
+ErrGrind 改变 Error / Evidence / Grill / Teach / Drill 的 domain model。
+
+这条原则推广到整个项目：**产品和研究问题自己定义；成熟工程问题先搜索和复用；复用实现时谨慎导入 ontology。**
+具体执行规则写在项目根目录 `AGENTS.md`。
+
 ### V1 成功标准与进入 V2 的前提
 
 - 用户能在实际学习中长期录入 Error，而非仅完成演示样例。

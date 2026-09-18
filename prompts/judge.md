@@ -6,7 +6,7 @@
 参考答案及解析：
 {reference_answer}
 
-学生的回答（含答案和思路）：
+学生的回答（含答案和思路；也可能附带图片，图片由本轮消息直接提供）：
 {user_response}
 
 本题训练的 Error Pattern：

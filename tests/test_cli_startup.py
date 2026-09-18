@@ -1,4 +1,5 @@
 import unittest
+import importlib
 import os
 import subprocess
 import sys
@@ -8,6 +9,22 @@ from errgrind.cli import app
 
 
 class CliStartupTests(unittest.TestCase):
+    def test_web_subcommand_dispatches_to_web_entrypoint(self):
+        entrypoint = importlib.import_module("errgrind.main")
+        with patch.object(sys, "argv", ["errgrind", "web", "--port", "9876"]), \
+             patch("errgrind.web.__main__.main") as web_main:
+            entrypoint.main()
+
+        web_main.assert_called_once_with(["--port", "9876"])
+
+    def test_without_web_subcommand_still_starts_cli(self):
+        entrypoint = importlib.import_module("errgrind.main")
+        with patch.object(sys, "argv", ["errgrind"]), \
+             patch("errgrind.cli.app.run_session") as run_session:
+            entrypoint.main()
+
+        run_session.assert_called_once_with()
+
     def test_cli_import_does_not_load_provider_sdks(self):
         code = (
             "import sys; import errgrind.cli.app; "

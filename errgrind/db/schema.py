@@ -1,4 +1,6 @@
-SCHEMA_VERSION = 3
+from ..models.titles import display_title_for_question, is_safe_display_title
+
+SCHEMA_VERSION = 6
 
 
 SCHEMA_SQL = """
@@ -9,6 +11,7 @@ CREATE TABLE IF NOT EXISTS error_records (
     source_error_id INTEGER,
     source_drill_attempt_id INTEGER,
     question TEXT NOT NULL,
+    display_title TEXT,
     user_thoughts TEXT,
     reference_answer TEXT,
     grilling_conversation TEXT,
@@ -40,9 +43,31 @@ CREATE TABLE IF NOT EXISTS drill_attempts (
     FOREIGN KEY (derived_error_id) REFERENCES error_records(id) ON DELETE SET NULL
 );
 
+-- Image bytes are kept out of conversation JSON.  Conversation messages and
+-- Drill attempts store only attachment IDs, so retries can reload the exact
+-- original bytes without putting them in templates or browser state.
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    error_id INTEGER,
+    drill_attempt_id INTEGER,
+    pending_key TEXT,
+    conversation_kind TEXT,
+    message_index INTEGER,
+    mime_type TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    data BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (error_id) REFERENCES error_records(id) ON DELETE CASCADE,
+    FOREIGN KEY (drill_attempt_id) REFERENCES drill_attempts(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_error_records_status ON error_records(status);
 CREATE INDEX IF NOT EXISTS idx_error_records_updated_at ON error_records(updated_at);
 CREATE INDEX IF NOT EXISTS idx_drill_attempts_source ON drill_attempts(source_error_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_error_message
+    ON attachments(error_id, conversation_kind, message_index);
+CREATE INDEX IF NOT EXISTS idx_attachments_attempt ON attachments(drill_attempt_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_pending ON attachments(pending_key);
 """
 
 
@@ -63,6 +88,24 @@ def create_tables(conn):
         conn.execute("ALTER TABLE error_records ADD COLUMN source_error_id INTEGER")
     if "source_drill_attempt_id" not in columns:
         conn.execute("ALTER TABLE error_records ADD COLUMN source_drill_attempt_id INTEGER")
+    added_display_title = "display_title" not in columns
+    if added_display_title:
+        conn.execute("ALTER TABLE error_records ADD COLUMN display_title TEXT")
+    # Backfill only missing or obviously unsafe generated titles.  A stable
+    # persisted title that is already plain remains unchanged.
+    legacy_titles = conn.execute(
+        "SELECT id, question, display_title FROM error_records"
+    ).fetchall()
+    unsafe_titles = [
+        (display_title_for_question(row["question"]), row["id"])
+        for row in legacy_titles
+        if not is_safe_display_title(row["display_title"])
+    ]
+    if unsafe_titles:
+        conn.executemany(
+            "UPDATE error_records SET display_title = ? WHERE id = ?",
+            unsafe_titles,
+        )
     if "grilling_diagnostic_state" not in columns:
         conn.execute(
             "ALTER TABLE error_records ADD COLUMN grilling_diagnostic_state TEXT"

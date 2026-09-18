@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import record_composer with context %}
+{% block title %}New error{% endblock %}
+{% block content %}
+<section class="workspace-view new-error-workspace">
+  <div class="page-heading">
+    <h1>New error</h1>
+    <p>先自然地写下这次发生了什么。整理后你可以编辑、补充，再确认保存。</p>
+  </div>
+  {{ record_composer() }}
+</section>
+{% endblock %}

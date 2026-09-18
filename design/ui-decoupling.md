@@ -12,3 +12,18 @@ application 边界。它编排现有 DB、LLM 与 Prompt 基础设施，并返�
 Drill 结果；它不引用 CLI、Rich 或 prompt_toolkit。CLI 只负责终端输入循环、确认、
 流式 token 的终端渲染和结果展示。未来 MCP、GUI 或 Mobile 应调用同一 application
 操作，而不是复制 Grill / Teach / Drill 流程或直接组合数据库与模型调用。
+
+
+## 本机 Web adapter
+
+当前正式 WebUI 使用 React + TypeScript + Vite + assistant-ui 的 `ExternalStoreRuntime`，生产构建仍由
+单个 Flask/Waitress 进程同源提供。React 只拥有 product UI；Flask 与 `ErrGrindApplication` 继续负责
+业务调用、恢复、安全边界和持久化，SQLite 仍是 workflow 的事实来源。每个请求独立打开 SQLite 连接，
+不跨线程共享连接；进程内操作保护与一次性 submission token 防止重复 mutation。
+
+Web 只读取公开 projection，过滤 system 消息，不序列化 Grill 诊断账本、隐藏答案或未提交的内部规格。
+Record 与 conversation 图片使用 durable attachment provenance；未判分 Drill preparation 仍暂存当前 Web
+进程，最终 Judge attempt 与可能派生的 Error 通过 Application 原子写入 SQLite。旧 Jinja 页面只保留为
+hidden fallback / compatibility projection，不定义当前产品信息架构。迁移决策见
+[React + assistant-ui WebUI 正式迁移](decisions/2026-09-14-assistant-ui-migration.md)，运行说明与限制见
+[WebUI 说明](../README.md)。
