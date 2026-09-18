@@ -57,7 +57,11 @@ CLI / TUI 或未来其他 frontend
 
 ## 复用、搜索与技术决策原则
 
-ErrGrind 的独特价值在 Error / Evidence / diagnosis / intervention 的产品与认识论结构，不在重复实现通用基础设施。开发前先判断问题属于哪一类：
+ErrGrind 的独特价值在 Error / Evidence / diagnosis / intervention 的产品与认识论结构，不在重复实现通用基础设施。
+
+**先判断目标，再判断实现路径。** 对任何非平凡方案，不要把用户提出的实现路径直接当成已选定方案。先还原真正目标与约束，再判断当前路径是否合理；主动检查项目已有能力、成熟实现/组件、标准方案、更简单的替代路径，以及可能被忽略的高杠杆决策。如果当前方案会造成明显不必要的复杂度、重复劳动或长期成本，应在实施前指出并选择更好的路径，而不是机械执行。不要假设用户熟悉工程生态；用户没有提出某个方案，不能视为该方案不存在。
+
+完成这一步后，再判断问题属于哪一类：
 
 - **产品 / domain semantics**：例如 Error、Grill、Teach、Drill、Evidence 边界与用户心智模型。这些必须由 ErrGrind 自己定义，不能因为某个框架已有 thread、memory、agent、course 等概念就迁就它。
 - **commodity engineering**：例如 chat composer、附件、滚动、Markdown/LaTeX、安全上传、streaming、auth、缓存、retrieval、agent runtime 等。实现非平凡版本前，先检查项目已有能力、标准库/协议和成熟开源实现，再比较 reuse / adapt / fork / build。
@@ -75,8 +79,6 @@ ErrGrind 的独特价值在 Error / Evidence / diagnosis / intervention 的产�
 - **Implementation surface 不等于 product surface。** CLI command、数据库表、状态枚举、API endpoint、内部 pipeline stage 都只是实现能力或 contract，不能默认一一映射成页面、导航、tab 或用户心智模型。新 frontend 应先从用户对象、任务与动作设计信息架构，再映射到底层能力。
 - **Measure before optimize.** 对 token、latency、context growth、provider 成本和性能的优化，优先基于 usage telemetry、真实 trace 和代表性工作流；不要仅凭直觉增加 cache、summary、压缩层或额外模型调用。
 - **按可逆性分配设计成本。** CSS/文案等低成本决策可以快速试；schema、ontology、framework/runtime、Evidence contract 等高切换成本决策应先搜索、做小实验并记录依据。不要为了“未来可能需要”提前冻结复杂抽象。
-
-对于用户自己未必知道“哪些东西可以抄”的领域，执行 agent 有责任主动识别 commodity subsystem 并提出成熟实现候选，而不是默认从零开始。提出候选时必须同时说明它复用了什么、会不会带入不合适的 ontology、以及迁移/维护代价。
 
 ## 设计记录
 
