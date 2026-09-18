@@ -329,6 +329,7 @@ class DatabaseWorkflowTests(unittest.TestCase):
             self.assertEqual(record.question, "历史题")
             self.assertEqual(record.origin, "unknown")
             self.assertIsNone(record.source_error_id)
+            self.assertEqual(record.display_title, "历史题")
             columns = {
                 row[1]
                 for row in migrated.conn.execute("PRAGMA table_info(drill_attempts)")
@@ -342,8 +343,13 @@ class DatabaseWorkflowTests(unittest.TestCase):
             self.assertEqual(attempt.judge_schema_sha256, "unknown")
             self.assertEqual(
                 migrated.conn.execute("PRAGMA user_version").fetchone()[0],
-                3,
+                6,
             )
+            columns = {
+                row[1]
+                for row in migrated.conn.execute("PRAGMA table_info(error_records)")
+            }
+            self.assertIn("display_title", columns)
         finally:
             migrated.close()
 

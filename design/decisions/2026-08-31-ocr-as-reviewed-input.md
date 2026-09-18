@@ -1,5 +1,9 @@
 # OCR 作为需人工校对的录题入口
 
+> Web superseded (2026-09-11): this remains the legacy CLI `/ocr` compatibility
+> contract only. Web image input is now sent directly as a multimodal attachment;
+> the Record structured preview remains a mandatory human confirmation boundary.
+
 后续扩展：[在录题字段内整合图片识别](2026-09-06-record-field-image-input.md) 将字段图片输入
 加入 `/record`；本文的整图识别契约继续用于兼容 `/ocr [路径]`。
 

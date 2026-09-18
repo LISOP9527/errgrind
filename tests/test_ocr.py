@@ -6,8 +6,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from errgrind.llm.client import LLMClient
+from errgrind.llm.codex import CodexClient
 from errgrind.llm.gemini import GeminiClient
 from errgrind.llm.ocr import OcrError, load_image, parse_ocr_result, parse_text_result
+from errgrind.llm.messages import ImagePart, MultimodalMessage
 
 
 class ImageValidationTests(unittest.TestCase):
@@ -133,3 +135,30 @@ class ProviderOcrTests(unittest.TestCase):
 
         self.assertEqual(actual, "只看到草稿思路")
         self.assertEqual(post.call_args.kwargs["json"]["generationConfig"]["response_schema"]["required"], ["text"])
+
+    def test_shared_multimodal_message_maps_to_each_provider_native_shape(self):
+        message = MultimodalMessage(
+            "user", "请看图", (ImagePart("image/png", self.image_data),)
+        )
+
+        openai_message = LLMClient._wire_messages([message])[0]
+        self.assertEqual(openai_message["content"][0], {"type": "text", "text": "请看图"})
+        self.assertEqual(openai_message["content"][1]["type"], "image_url")
+        self.assertEqual(
+            base64.b64decode(openai_message["content"][1]["image_url"]["url"].split(",", 1)[1]),
+            self.image_data,
+        )
+
+        codex_body = CodexClient(model="test-model")._body([message])
+        self.assertEqual(codex_body["input"][0]["content"][0], {"type": "input_text", "text": "请看图"})
+        self.assertEqual(codex_body["input"][0]["content"][1]["type"], "input_image")
+        self.assertEqual(
+            base64.b64decode(codex_body["input"][0]["content"][1]["image_url"].split(",", 1)[1]),
+            self.image_data,
+        )
+
+        gemini_body = GeminiClient._request_body([message], {})
+        self.assertEqual(gemini_body["contents"][0]["parts"][0], {"text": "请看图"})
+        inline = gemini_body["contents"][0]["parts"][1]["inline_data"]
+        self.assertEqual(inline["mime_type"], "image/png")
+        self.assertEqual(base64.b64decode(inline["data"]), self.image_data)

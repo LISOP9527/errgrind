@@ -11,6 +11,7 @@ class ErrorRecord:
     source_error_id: Optional[int]
     source_drill_attempt_id: Optional[int]
     question: str
+    display_title: Optional[str]
     user_thoughts: Optional[str]
     reference_answer: Optional[str]
     grilling_conversation: Optional[str]
@@ -36,6 +37,23 @@ class DrillAttempt:
     judge_prompt_sha256: str
     judge_schema_sha256: str
     derived_error_id: Optional[int]
+    created_at: datetime
+    attachment_ids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class StoredAttachment:
+    """Durable image metadata plus bytes for an application model call."""
+
+    id: int
+    mime_type: str
+    data: bytes
+    sha256: str
+    error_id: Optional[int]
+    drill_attempt_id: Optional[int]
+    pending_key: Optional[str]
+    conversation_kind: Optional[str]
+    message_index: Optional[int]
     created_at: datetime
 
 

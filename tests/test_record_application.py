@@ -144,12 +144,13 @@ class RecordErrorApplicationTests(unittest.TestCase):
         self.assertEqual(result.reference_answer, "x=2")
         self.assertEqual(result.origin, "ocr")
         self.assertEqual(result.status, "pending-grill")
+        self.assertEqual(result.display_title, "求 x")
+        self.assertEqual(self.db.get_error(result.id).display_title, "求 x")
         self.assertIsNone(result.grilling_diagnostic_state)
 
     def test_record_error_rejects_missing_required_fields_or_bad_origin(self):
         cases = (
             ("", "思路", None, "题目不能为空"),
-            ("题目", "  ", None, "用户思路不能为空"),
             ("题目", "思路", 42, "参考答案必须是文字"),
             ("题目", "思路", None, "录题来源必须是 record 或 ocr"),
         )
@@ -159,6 +160,11 @@ class RecordErrorApplicationTests(unittest.TestCase):
                 with self.assertRaisesRegex(OutputContractError, expected):
                     self.app.record_error(question, thoughts, answer, origin=origin)
         self.assertEqual(self.db.list_all_errors(), [])
+
+    def test_record_error_preserves_missing_user_thoughts(self):
+        result = self.app.record_error("题目", None, "答案")
+        self.assertIsNone(result.user_thoughts)
+        self.assertIsNone(self.db.get_error(result.id).user_thoughts)
 
     def test_plain_record_defaults_and_optional_answer(self):
         for answer in (None, "", "  "):

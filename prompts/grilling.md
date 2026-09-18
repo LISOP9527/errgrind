@@ -45,6 +45,13 @@ Grill 的首要目标是诊断，不是 Teach；它不要求对用户产生零�
 - `initial_user_thoughts`：录题时用户提供的原始思路；
 - `message:N`：`grilling_conversation` 中真实的用户消息索引。
 
+- `initial_attachment:N`：原始 Error 录入时保存的用户图片附件；
+- `message:N:attachment:M`：该真实用户消息保存的图片附件。
+
+图片是 authentic user behavioral evidence，但模型视觉理解不是用户逐字原话。图片附件
+Evidence 的 `quote` 必须是空字符串，严禁编造模型视觉转录；文字 Evidence 继续使用对应
+用户原文的精确 substring 规则。
+
 `quote` 必须是对应用户原文的精确 substring。`initial_user_thoughts` 是 retrospective reconstruction，应在 interpretation 中保留其可能有遗漏或偏差的性质；Grill 中用户对过去思路的回忆与用户当前的理解也必须分开记录和解释。不能引用 system message、assistant message、题目、参考答案、模型自己的 hypothesis、问题、预测，或 bootstrap 文本“开始吧”。如果用户回答很短、只是展示当前理解、或无法区分候选解释，仍须记录这条观察，但 `supports` 和 `contradicts` 都应为空，并在 `interpretation` 说明证据不足，不能强行归类。若用户提交一个新的当前错误，而它不能可靠关联原始 Error 的 failure mechanism，则它是 non-discriminating Evidence：保存原话和解释，但不要把它当作原始 Error 机制的支持或反驳。
 
 每次处理真实的最新用户回答，至少新增一条引用该消息的 Evidence；所有引用该最新消息的 Evidence，在 current_probe_id 非空时都必须使用该 probe_id。即使回答是“不记得了”，或本轮结束为 undetermined，也必须留下 observation。initial_user_thoughts 不要求关联当前 Probe。
@@ -93,6 +100,9 @@ Grill 的首要目标是诊断，不是 Teach；它不要求对用户产生零�
 ```
 
 当存在可引用的用户 Evidence 时，`new_evidence` 中每个 evidence item 必须包含 `source_ref`、`quote`、`interpretation`、`supports`、`contradicts` 和 `probe_id` 六个字段（例如 `"source_ref": "initial_user_thoughts"` 或 `"source_ref": "message:N"`）。`quote` 必须从实际提供的用户文本中逐字精确复制（verbatim substring），严禁填写占位符、概括或修改原文。
+
+图片附件 source_ref 必须使用上面列出的持久化附件引用，且 `quote` 必须为 `""`；不得把
+模型视觉转录当成用户原话。
 
 当前诊断 state 是事实来源。不要重写旧 hypothesis 的 claim，不要删除旧 Evidence 或 Probe；本轮只输出 delta。不要引用临时诊断上下文本身作为 Evidence。应用程序会分配 E/P ID、合并 state、执行状态转换并决定用户可见文本。
 

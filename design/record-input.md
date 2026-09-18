@@ -1,35 +1,48 @@
 # 错题录入与图片输入
 
-`/record` 是统一录题入口。CLI 仍可按题目、用户当时的思路或作答、参考答案分别填写；
-Web 先接受一段自然的文字和可选图片，再把用户实际提供的内容整理为这三个可编辑字段。
-题目与思路必填；确实没有思路时由用户填写「没有思路」，参考答案可以留空。
+`/record` 是统一录题入口。Web 接受文字和零或多张 PNG、JPEG、WebP 图片，并把每一轮
+文字补充、当前可编辑草稿和本轮图片作为一次多模态 user turn 交给当前模型，更新
+`question`、`user_thoughts`、`reference_answer` 结构化草稿。模型没有从材料中得到的
+`user_thoughts` 必须保持为空，不得根据题目推断。
 
-Web 的整理操作只产生待审核草稿，不创建 Error。用户可以直接编辑字段或跳过模型整理，
-确认后才调用现有 `record_error` 保存；模型没有从原始材料中得到的 `user_thoughts` 保持为空，
-不会因为题目或参考答案而被推断出来。
+## Web Record 的迭代调整
 
-## 字段图片输入
+Record 不是一次提交即结束的整理请求。第一次输入和之后每次调整都遵循同一条路径：
 
-- 每个编辑窗口提供 F2 / Ctrl+O「添加图片」入口。终端通过运行 ErrGrind 的机器上的文件路径选图，
-  支持 PNG、JPEG、WebP，每张上限 20 MB；远程终端需要先把图片传到该机器。
-- 识别只针对当前字段。思路图或答案图无需包含题目，图片中的错误步骤也不应被模型纠正。
-- 识别文字追加到当前草稿，返回同一窗口继续编辑；可重复添加图片。一次识别不代表提交字段，
-  更不代表完成录题。
-- 选图取消、图片无效、模型失败或识别期间中断，返回原编辑窗口并保留已有文字。
-  在字段编辑窗口取消，则取消整次录题，不写入半条记录。
-- 三个字段全部由用户提交后才创建一条 `pending-grill` Error。只保存文本，不保存原图。
-  任一字段成功使用 OCR 时来源为 `ocr`，纯文字录入为 `record`；来源不证明 Evidence 独立性。
+1. 前端发送新的自然语言补充、当前预览中的三个可编辑字段以及当前选择的图片。
+2. Application 保持严格的 JSON 对象和字符串字段契约；字段值暂时为空属于语义上的
+   incomplete draft，不是模型输出契约失败。模型应保留没有被本轮明确修改的当前字段，
+   最新用户明确的纠正覆盖旧内容。
+3. 成功后返回更新后的可编辑预览和确定性的 ready/incomplete 状态。原始补充输入被清空，
+   用户可以继续输入下一轮；图片仍作为当前待确认图片，直到最终保存或用户替换它们。
 
-## 边界
+`question` 是确认保存前唯一必须补齐的字段；参考答案可选，`user_thoughts` 仍可缺失，
+并且不能由模型为了完整性自行补写。所有中间草稿只存在于页面/sessionStorage，不能创建
+SQLite Error。只有用户确认时才调用 `record_error`，由它执行最终的非空题目校验和持久化。
 
-Frontend 负责选路径、快捷键、草稿编辑与进度展示；Application 负责字段选择、OCR Prompt
-组装、识别调用与返回文本校验。Provider 负责图片校验、图片传输与输出格式解析。
-所有识别结果均为尚未持久化的录入草稿，只有用户确认后的文字才进入业务工作流。
+模型返回的草稿仍然只是可编辑预览：用户可以多轮补充和手动修订，必须校对并确认后才创建
+`pending-grill` Error。
+没有参考答案或用户思路时可以保持为空；确认时不要求模型先转录图片，也不把 OCR 文本插入
+编辑器。已确认的原始图片作为 Error 的 initial attachment 保存，供后续 Grill 直接使用。
 
-Drill 答题面板也支持同样的图片追加与校对操作，转录目标为当前答案与解题思路；
-确认后提交 Judge。详见 [Drill 答题图片输入](decisions/2026-09-08-drill-answer-ocr.md)。
+## Web 对话和 Drill
 
-原 `/ocr [路径]` 保留为整图识别三个字段的快捷入口，识别后进入同一套字段校对流程。
-整图 OCR 继续要求识别到题目；分离截图使用 `/record` 的字段图片输入。
+- Grill、Teach 和 Drill 使用统一的 `+ 图片` 附件入口。文字可以为空，但至少要有文字或图片。
+- 图片随具体 Error conversation turn 或 Drill attempt 保存；模型失败后，刷新页面可以重试而
+  不必重新上传。公共时间线只显示紧凑附件标记，不显示模型转录。
+- Grill 的图片 Evidence 使用 durable attachment reference，`quote` 必须为空；真实文字
+  Evidence 仍必须通过 exact-substring 校验。图片不是模型生成的用户逐字引文。
+- Drill Judge 直接接收文字和图片。答错派生 Error 时复制相关附件，因此不会把图像答案降级为
+  `[image]` 文本；DrillSpec 和参考答案仍不会在提交前进入 Web 表单。
 
-相关决策：[字段内图片录入](decisions/2026-09-06-record-field-image-input.md)。
+## 边界和兼容
+
+Frontend 只负责选择文件、收集表单和展示草稿/进度；`ErrGrindApplication` 负责加载图片、
+保存附件、恢复消息、调用模型和维护状态。Provider adapter 将同一个 neutral multimodal
+message 映射成各自的请求协议。所有图片继续通过 `load_image` 的真实 bytes、MIME 和 20 MB
+限制校验；服务端使用固定临时文件名，不信任浏览器文件名。
+
+SQLite `attachments` 表保存 BLOB、MIME、SHA-256 和归属关系；conversation JSON 只保存附件
+ID，不塞入 base64，也不写入模板或隐藏浏览器状态。Error 删除时由外键清理其附件，Drill
+pending/attempt 使用独立 provenance 关系。旧 CLI `/ocr`、字段 OCR 和 Drill OCR 方法可以
+暂留兼容，但 Web 不再提供或调用这些 route。

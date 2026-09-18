@@ -4,6 +4,62 @@ const errorBox = document.querySelector('#request-error');
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 let active = false;
 
+const drawerToggle = document.querySelector('#drawer-toggle');
+const sidebarMedia = window.matchMedia('(max-width: 760px)');
+const sidebarStorageKey = 'errgrind:sidebar-collapsed';
+
+function isMobileLayout() {
+  return sidebarMedia.matches;
+}
+
+function readSidebarPreference() {
+  try { return window.localStorage.getItem(sidebarStorageKey) === '1'; }
+  catch (_) { return false; }
+}
+
+function writeSidebarPreference(collapsed) {
+  try { window.localStorage.setItem(sidebarStorageKey, collapsed ? '1' : '0'); }
+  catch (_) { /* Private browsing may disable localStorage. */ }
+}
+
+function updateSidebarControls() {
+  const collapsed = document.body.classList.contains('sidebar-collapsed');
+  const expanded = isMobileLayout() ? Boolean(drawerToggle?.checked) : !collapsed;
+  document.querySelectorAll('[data-sidebar-toggle]').forEach(control => {
+    control.setAttribute('aria-expanded', String(expanded));
+  });
+}
+
+function syncSidebarLayout() {
+  if (isMobileLayout()) {
+    // A desktop preference is deliberately scoped to the desktop layout.
+    document.body.classList.remove('sidebar-collapsed');
+    if (drawerToggle) drawerToggle.checked = false;
+  } else {
+    document.body.classList.toggle('sidebar-collapsed', readSidebarPreference());
+    if (drawerToggle) drawerToggle.checked = false;
+  }
+  updateSidebarControls();
+}
+
+document.querySelectorAll('[data-sidebar-toggle]').forEach(control => {
+  control.addEventListener('click', () => {
+    if (isMobileLayout()) {
+      if (drawerToggle) drawerToggle.checked = !drawerToggle.checked;
+      updateSidebarControls();
+      return;
+    }
+    const collapsed = !document.body.classList.contains('sidebar-collapsed');
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    writeSidebarPreference(collapsed);
+    updateSidebarControls();
+  });
+});
+drawerToggle?.addEventListener('change', updateSidebarControls);
+if (sidebarMedia.addEventListener) sidebarMedia.addEventListener('change', syncSidebarLayout);
+else sidebarMedia.addListener(syncSidebarLayout);
+syncSidebarLayout();
+
 function renderMath() {
   document.querySelectorAll('[data-tex]').forEach(node => {
     if (!window.katex) return;
@@ -17,24 +73,70 @@ function renderMath() {
 }
 renderMath();
 
+function landOnCurrentWork() {
+  const current = document.querySelector('[data-current-work]');
+  const navigation = window.performance?.getEntriesByType('navigation')?.[0];
+  // A fragment (including the explicit post-submit #composer) and browser
+  // history navigation remain authoritative; only a plain Error open gets
+  // the chat-workspace landing position.
+  if (!current || window.location.hash || navigation?.type === 'back_forward' || window.scrollY > 0) return;
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      // The sticky composer is already visible at the viewport bottom on a
+      // fresh load, so scrollIntoView() considers it satisfied.  The document
+      // bottom is the actual latest-work anchor behind that sticky surface.
+      const bottom = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      window.scrollTo({top: bottom, behavior: 'auto'});
+    });
+  });
+}
+landOnCurrentWork();
+
 function storageKey(form) {
   return form.dataset.draftKey ? `errgrind:draft:${form.dataset.draftKey}` : '';
 }
+const recordDraftFields = ['question', 'user_thoughts', 'reference_answer'];
+
+function localRecordDraftStatus(form) {
+  const question = form.elements.question?.value?.trim() || '';
+  return question
+    ? {ready: true, status: 'ready', message: '草稿已具备题目，可以继续调整或确认保存。'}
+    : {ready: false, status: 'incomplete', message: '还缺少题目；请继续补充题目，参考答案和当时的思路可以留空。'};
+}
+
+function renderRecordDraftStatus(form, result = {}) {
+  const statusNode = form.querySelector('[data-draft-status]');
+  if (!statusNode) return;
+  const fallback = localRecordDraftStatus(form);
+  const ready = typeof result.ready === 'boolean' ? result.ready : fallback.ready;
+  const status = result.status || (ready ? 'ready' : 'incomplete');
+  statusNode.textContent = result.message || fallback.message;
+  statusNode.dataset.status = status;
+  statusNode.hidden = false;
+  const confirm = form.querySelector('[data-draft-confirm]');
+  if (confirm) confirm.disabled = !ready;
+}
+
 function readDraft(form) {
   const key = storageKey(form);
-  if (!key) return;
+  if (!key) return {};
   try {
     const saved = JSON.parse(sessionStorage.getItem(key) || '{}');
     form.querySelectorAll('textarea[name]').forEach(field => {
       if (!field.value && typeof saved[field.name] === 'string') field.value = saved[field.name];
     });
+    return saved;
   } catch (_) { /* Private browsing may disable sessionStorage. */ }
+  return {};
 }
 function saveDraft(form) {
   const key = storageKey(form);
   if (!key) return;
   const values = {};
   form.querySelectorAll('textarea[name]').forEach(field => { values[field.name] = field.value; });
+  if (form.classList.contains('record-flow')) {
+    values.__preview = !form.querySelector('[data-preview]')?.hidden;
+  }
   try { sessionStorage.setItem(key, JSON.stringify(values)); } catch (_) { /* Keep the live form usable. */ }
 }
 function clearDraft(form) {
@@ -96,41 +198,55 @@ document.querySelectorAll('[data-draft-submit]').forEach(button => {
     data.append('raw_input', form.elements.raw_input.value);
     [...form.querySelector('[data-draft-images]').files].forEach(file => data.append('images', file));
     const state = begin(button.textContent);
+    let updated = false;
+    let draftResult = {};
     try {
       const {response, result} = await send(button.dataset.draftUrl, data);
       if (result.submit_token) button.dataset.submitToken = result.submit_token;
       if (!response.ok) { showError(result.error || '整理失败，请保留草稿。'); return; }
+      draftResult = result;
       const draft = result.draft || {};
-      ['question', 'user_thoughts', 'reference_answer'].forEach(field => {
+      recordDraftFields.forEach(field => {
         const target = form.elements[field];
         if (target) target.value = draft[field] || '';
       });
-      saveDraft(form);
+      // The uploaded files remain selected as the current images so the same
+      // confirmed artifacts can reach /record; only the raw adjustment turn
+      // is consumed by this successful update.
+      form.elements.raw_input.value = '';
       form.querySelector('[data-preview]').hidden = false;
-      form.querySelector('[data-preview] textarea')?.focus();
-      if (draft.origin === 'ocr') form.elements.ocr_used.value = '1';
+      updated = true;
+      saveDraft(form);
+      form.elements.raw_input.focus();
     } catch (error) { showError(error.message || '整理失败，请保留草稿。'); }
-    finally { state.end(); }
-  });
-});
-
-document.querySelectorAll('[data-show-preview]').forEach(button => {
-  button.addEventListener('click', () => {
-    const preview = document.getElementById(button.getAttribute('aria-controls'));
-    if (!preview) return;
-    preview.hidden = false;
-    preview.querySelector('textarea')?.focus();
+    finally {
+      state.end();
+      if (updated) renderRecordDraftStatus(form, draftResult);
+    }
   });
 });
 
 document.querySelectorAll('form[data-action]').forEach(form => {
-  readDraft(form);
-  form.querySelectorAll('textarea[name]').forEach(field => field.addEventListener('input', () => saveDraft(form)));
+  const saved = readDraft(form);
+  if (form.classList.contains('record-flow') &&
+      (saved.__preview === true || recordDraftFields.some(field => form.elements[field]?.value))) {
+    form.querySelector('[data-preview]').hidden = false;
+    renderRecordDraftStatus(form);
+  }
+  form.querySelectorAll('textarea[name]').forEach(field => field.addEventListener('input', () => {
+    saveDraft(form);
+    if (form.classList.contains('record-flow') && field.name === 'question' &&
+        !form.querySelector('[data-preview]')?.hidden) {
+      renderRecordDraftStatus(form);
+    }
+  }));
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (active) return;
     const data = new FormData(form);
-    const state = begin(event.submitter?.textContent || '提交');
+    const state = begin(
+      event.submitter?.dataset.workingLabel || form.dataset.workingLabel || event.submitter?.textContent || '提交'
+    );
     try {
       const {response, result} = await send(form.action, data);
       if (result.submit_token) form.elements.submit_token.value = result.submit_token;
@@ -154,58 +270,116 @@ document.querySelectorAll('form[data-action]').forEach(form => {
   });
 });
 
-// Drill is a short action, so entering it starts preparation immediately.
-// The form remains as a no-JavaScript/retry fallback without exposing the
-// internal spec/draft stages in the UI.
-document.querySelectorAll('form[data-auto-prepare]').forEach(form => {
-  window.requestAnimationFrame(() => {
-    if (!active) form.requestSubmit();
-  });
-});
+function initSettingsForm() {
+  const form = document.querySelector('#config-form');
+  if (!form) return;
 
-document.querySelectorAll('input[data-ocr-field]').forEach(input => {
-  input.addEventListener('change', async () => {
-    const file = input.files[0];
-    if (!file || active) return;
-    const data = new FormData();
-    data.append('image', file);
-    data.append('submit_token', input.dataset.token);
-    const state = begin('识别图片');
-    try {
-      const {response, result} = await send(input.dataset.url, data);
-      if (result.submit_token) input.dataset.token = result.submit_token;
-      if (!response.ok) { showError(result.error || '图片识别失败，请保留当前草稿。'); return; }
-      const target = document.getElementById(input.dataset.ocrField);
-      // Read the latest editor value: typing during OCR must not be overwritten.
-      target.value += (target.value ? '\n\n' : '') + result.text;
-      saveDraft(input.form);
-      input.form.elements.ocr_used.value = '1';
-      target.focus();
-    } catch (error) { showError(error.message || '图片识别失败，已有草稿仍在。'); }
-    finally { input.value = ''; state.end(); }
-  });
-});
+  const providerSelect = form.querySelector('#config-provider') || form.querySelector('[name="provider"]');
+  const modelInput = form.querySelector('#config-model') || form.querySelector('[name="model"]');
+  const effortRow = form.querySelector('[data-config-row="reasoning_effort"]');
+  const effortSelect = form.querySelector('#config-reasoning-effort') || form.querySelector('[name="reasoning_effort"]');
+  const apiKeyRow = form.querySelector('[data-config-row="api_key"]');
+  const apiKeyInput = form.querySelector('#config-api-key') || form.querySelector('[name="api_key"]');
+  const clearKeyRow = form.querySelector('[data-config-row="clear_api_key"]');
+  const clearKeyCheckbox = form.querySelector('#config-clear-api-key') || form.querySelector('[name="clear_api_key"]');
+  const apiKeyStatus = form.querySelector('[data-config-key-status]');
+  const apiKeyHint = form.querySelector('[data-config-hint="api_key"]');
+  const codexHint = form.querySelector('[data-config-hint="codex"]');
+  const baseUrlRow = form.querySelector('[data-config-row="base_url"]');
+  const baseUrlInput = form.querySelector('#config-base-url') || form.querySelector('[name="base_url"]');
+  const apiKeyInputWrap = form.querySelector('.api-key-input-wrap');
 
-document.querySelectorAll('input[data-drill-ocr]').forEach(input => {
-  input.addEventListener('change', async () => {
-    const file = input.files[0];
-    if (!file || active) return;
-    const data = new FormData();
-    data.append('image', file);
-    data.append('csrf', csrf);
-    data.append('submit_token', input.dataset.token);
-    data.append('answer', document.getElementById(input.dataset.target).value);
-    const state = begin('识别答案图片');
-    try {
-      const {response, result} = await send(input.dataset.url, data);
-      if (result.submit_token) input.dataset.token = result.submit_token;
-      if (!response.ok) { showError(result.error || '图片识别失败，请保留答案草稿。'); return; }
-      const target = document.getElementById(input.dataset.target);
-      target.value += (target.value ? '\n\n' : '') + result.text;
-      saveDraft(input.form);
-      target.focus();
-    } catch (error) { showError(error.message || '图片识别失败，请保留答案草稿。'); }
-    finally { input.value = ''; state.end(); }
+  if (!providerSelect) return;
+
+  const initialProvider = providerSelect.value;
+
+  function syncProvider(isUserChange) {
+    const provider = providerSelect.value;
+    const selectedOption = providerSelect.selectedOptions?.[0] || providerSelect.querySelector(`option[value="${provider}"]`);
+    const defaultModel = selectedOption?.dataset.defaultModel || '';
+
+    if (isUserChange && modelInput && defaultModel) {
+      modelInput.value = defaultModel;
+    }
+    if (modelInput && defaultModel) {
+      modelInput.placeholder = defaultModel;
+    }
+
+    const isCodex = provider === 'codex';
+    if (effortRow) effortRow.hidden = !isCodex;
+    if (effortSelect) effortSelect.disabled = !isCodex;
+
+    const isOpenCode = provider === 'opencode';
+    if (baseUrlRow) baseUrlRow.hidden = !isOpenCode;
+    if (baseUrlInput) baseUrlInput.disabled = !isOpenCode;
+
+    if (isUserChange && isOpenCode && baseUrlInput) {
+      const defaultBaseUrl = selectedOption?.dataset.defaultBaseUrl || selectedOption?.dataset.defaultUrl || baseUrlInput.dataset.defaultBaseUrl || baseUrlInput.placeholder || '';
+      if (!baseUrlInput.value.trim() && defaultBaseUrl) {
+        baseUrlInput.value = defaultBaseUrl;
+      }
+    }
+
+    if (isCodex) {
+      if (apiKeyInputWrap) apiKeyInputWrap.hidden = true;
+      if (apiKeyInput) {
+        apiKeyInput.disabled = true;
+        apiKeyInput.value = '';
+      }
+      if (clearKeyRow) clearKeyRow.hidden = true;
+      if (clearKeyCheckbox) {
+        clearKeyCheckbox.disabled = true;
+        clearKeyCheckbox.checked = false;
+      }
+      if (apiKeyStatus) apiKeyStatus.hidden = true;
+      if (apiKeyHint) apiKeyHint.hidden = true;
+      if (codexHint) codexHint.hidden = false;
+    } else {
+      if (apiKeyInputWrap) apiKeyInputWrap.hidden = false;
+      if (apiKeyInput) apiKeyInput.disabled = false;
+      if (codexHint) codexHint.hidden = true;
+      if (apiKeyHint) apiKeyHint.hidden = false;
+
+      const isSameAsInitial = provider === initialProvider;
+      if (apiKeyStatus) apiKeyStatus.hidden = !isSameAsInitial;
+      if (clearKeyRow) clearKeyRow.hidden = !isSameAsInitial;
+      if (clearKeyCheckbox) {
+        clearKeyCheckbox.disabled = !isSameAsInitial;
+        if (!isSameAsInitial) clearKeyCheckbox.checked = false;
+      }
+      if (apiKeyInput) {
+        apiKeyInput.placeholder = isSameAsInitial
+          ? (apiKeyStatus?.querySelector('.is-set') ? '已配置 API Key（留空保持不变）' : '输入 API Key')
+          : `输入 ${selectedOption?.textContent?.trim() || provider} API Key`;
+      }
+    }
+  }
+
+  providerSelect.addEventListener('change', () => syncProvider(true));
+  syncProvider(false);
+
+  form.addEventListener('submit', event => {
+    if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+      return;
+    }
+    if (form.dataset.submitting === 'true') {
+      event.preventDefault();
+      return;
+    }
+    form.dataset.submitting = 'true';
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      setTimeout(() => {
+        submitBtn.disabled = true;
+      }, 0);
+    }
+  });
+}
+initSettingsForm();
+
+document.querySelectorAll('[data-close-details]').forEach(button => {
+  button.addEventListener('click', () => {
+    button.closest('details')?.removeAttribute('open');
   });
 });
 
@@ -213,4 +387,12 @@ window.addEventListener('beforeunload', event => {
   if (active) { event.preventDefault(); event.returnValue = ''; }
 });
 // Browser back/forward cache may preserve an old disabled working state.
-window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
+window.addEventListener('pageshow', event => {
+  if (event.persisted) location.reload();
+  const form = document.querySelector('#config-form');
+  if (form) {
+    form.dataset.submitting = 'false';
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});

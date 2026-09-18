@@ -1,44 +1,109 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import credentials, action, conversation with context %}
+{% from 'macros.html' import credentials, conversation with context %}
 {% set grill_pending = error.status == 'pending-grill' %}
 {% set teach_available = not grill_pending %}
-{% set grill_needs_answer = grill and grill[-1].role == 'assistant' %}
-{% set teach_needs_answer = teach and teach[-1].role == 'assistant' %}
+{% set grill_needs_answer = grill_pending and grill and grill[-1].role == 'assistant' %}
+{% set teach_needs_answer = teach_available and teach and teach[-1].role == 'assistant' %}
+{% set has_thoughts = error.user_thoughts and error.user_thoughts.strip() %}
 {% block title %}{{ error_title|default('Error') }}{% endblock %}
 {% block content %}
 <section class="workspace-view error-workspace">
   <header class="error-header">
-    <h1>{{ error_title|default('这道题的记录') }}</h1>
-    <div class="header-actions">
-      <details class="header-menu problem-control">
-        <summary>Problem<span class="sr-only">查看题目</span></summary>
-        <div class="header-popover problem-popover">
-          <div class="markdown">{{ md(error.question) }}</div>
-          <details class="context-details"><summary>查看当时的思路回忆</summary><div class="markdown">{{ md(error.user_thoughts) }}</div></details>
-          {% if error.reference_answer %}<details class="context-details"><summary>查看参考答案</summary><div class="markdown">{{ md(error.reference_answer) }}</div></details>{% endif %}
+    <div class="error-header-main">
+      <label class="menu-button mobile-menu-button" for="drawer-toggle" aria-label="打开导航">☰</label>
+      <details class="title-context">
+        <summary aria-label="查看当前 Error 的上下文">
+          <span class="title-text" role="heading" aria-level="1">{{ error_title|default('这道题的记录') }}</span>
+          <span class="title-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="header-popover context-popover">
+          <div class="popover-heading">Current Error</div>
+          <details class="context-block">
+            <summary>
+              <span class="context-label">题目</span>
+              <span class="context-summary">{{ question_excerpt }}</span>
+              <span class="context-expand" aria-hidden="true">查看</span>
+            </summary>
+            <div class="markdown">{{ md(error.question) }}</div>
+          </details>
+          {% if has_thoughts %}
+          <details class="context-block">
+            <summary>
+              <span class="context-label">当时的作答 / 思路</span>
+              <span class="context-summary">{{ thoughts_excerpt }}</span>
+              <span class="context-expand" aria-hidden="true">查看</span>
+            </summary>
+            <div class="markdown">{{ md(error.user_thoughts) }}</div>
+          </details>
+          {% endif %}
+          {% if error.reference_answer %}
+          <details class="context-block">
+            <summary>
+              <span class="context-label">参考答案</span>
+              <span class="context-summary">{{ reference_excerpt }}</span>
+              <span class="context-expand" aria-hidden="true">查看</span>
+            </summary>
+            <div class="markdown">{{ md(error.reference_answer) }}</div>
+          </details>
+          {% endif %}
+          <dl class="metadata-list">
+            <div><dt>来源</dt><dd>{{ origin_label|default('其他来源') }}</dd></div>
+            <div><dt>记录时间</dt><dd>{{ error.created_at.strftime('%Y年%m月%d日 %H:%M') }}</dd></div>
+            {% if error.source_error_id %}<div><dt>关联 Error</dt><dd><a href="{{ url_for('error_detail', error_id=error.source_error_id) }}">查看来源 Error</a></dd></div>{% endif %}
+          </dl>
         </div>
       </details>
-      <details class="header-menu metadata">
-        <summary aria-label="查看记录信息">…</summary>
-        <div class="header-popover metadata-popover">
-          <dl class="metadata-list">
-            <div><dt>来源</dt><dd>{{ origin_label|default('文字录入') }}</dd></div>
-            <div><dt>记录时间</dt><dd>{{ error.created_at.strftime('%Y年%m月%d日 %H:%M') }}</dd></div>
-            {% if error.source_error_id %}<div><dt>关联记录</dt><dd><a href="{{ url_for('error_detail', error_id=error.source_error_id) }}">查看来源 Error</a></dd></div>{% endif %}
-          </dl>
+    </div>
+    <div class="header-actions">
+      <details class="header-menu management-menu">
+        <summary aria-label="管理当前 Error">…</summary>
+        <div class="header-popover management-popover">
+          <span class="menu-heading">Manage error</span>
+          <details class="delete-step">
+            <summary class="danger-action">Delete error</summary>
+            <div class="delete-confirmation">
+              <p>删除后不可恢复。确定要删除这条 Error 吗？</p>
+              <form class="delete-form" method="post" action="{{ url_for('delete_error', error_id=error.id) }}" data-action>
+                {{ credentials(url_for('delete_error', error_id=error.id)) }}
+                <input type="hidden" name="confirm_delete" value="1">
+                <div class="confirm-actions">
+                  <button class="secondary" type="button" data-close-details>Cancel</button>
+                  <button class="danger-button" type="submit">Delete error</button>
+                </div>
+              </form>
+            </div>
+          </details>
         </div>
       </details>
     </div>
   </header>
 
   <div class="message-stream" aria-label="对话记录">
-    <article class="message problem-message" id="original">
-      <div class="message-header"><span class="message-author">你</span></div>
-      <div class="message-content markdown question-copy">{{ md(error.question) }}</div>
-      <div class="message-context">
-        <details class="context-details"><summary>查看当时的思路回忆</summary><div class="markdown">{{ md(error.user_thoughts) }}</div></details>
-        {% if error.reference_answer %}<details class="context-details"><summary>查看参考答案</summary><div class="markdown">{{ md(error.reference_answer) }}</div></details>{% endif %}
+    <article class="original-error">
+      <div class="original-error-heading">
+        <span class="note-label">原始 Error</span>
+        <span class="original-error-caption">题目与当时的作答属于同一个记录事件</span>
+        {% if initial_attachment_count %}<span class="attachment-indicator">＋ 图片{% if initial_attachment_count > 1 %} {{ initial_attachment_count }}{% endif %}</span>{% endif %}
       </div>
+      <details class="original-details"{% if not original_is_long %} open{% endif %}>
+        <summary>
+          <span class="original-summary-label">题目</span>
+          {% if original_is_long %}<span class="original-summary-copy">{{ question_excerpt }}</span>{% else %}<span class="original-summary-copy">题目与当时的作答 / 思路</span>{% endif %}
+          <span class="original-summary-action">{% if original_is_long %}展开{% else %}收起{% endif %}</span>
+        </summary>
+        <div class="original-error-body">
+          <div class="original-part">
+            <span class="context-label">题目</span>
+            <div class="message-content markdown question-copy">{{ md(error.question) }}</div>
+          </div>
+          {% if has_thoughts %}
+          <div class="original-part">
+            <span class="context-label">当时的作答 / 思路</span>
+            <div class="message-content markdown">{{ md(error.user_thoughts) }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </details>
     </article>
 
     {% if grill %}{{ conversation(grill) }}{% endif %}
@@ -53,44 +118,38 @@
     {% if teach_available and teach %}{{ conversation(teach) }}{% endif %}
   </div>
 
-  {% if next_step %}
-  <aside class="next-step">
-    <div class="next-step-copy"><span class="note-label">Suggested next</span><strong>{{ next_step.label }}</strong><span>{{ next_step.description }}</span></div>
-    {% if next_step.code == 'start_drill' %}<a class="text-button" href="{{ next_step.href }}">开始练习 <span aria-hidden="true">→</span></a>{% endif %}
-  </aside>
-  {% endif %}
+  {% if next_step or grill_needs_answer or teach_needs_answer %}
+  <section class="current-workbench{% if grill_needs_answer or teach_needs_answer %} has-composer{% endif %}" id="composer" data-current-work aria-label="当前操作">
+    {% if next_step %}
+    <aside class="next-step" aria-label="下一步">
+      <div class="next-step-copy">{{ next_step.description }}</div>
+      {% if next_step.method == 'post' %}
+      <form method="post" action="{{ next_step.href }}" data-action>
+        {{ credentials(next_step.href) }}
+        <button class="action-cta" type="submit">{{ next_step.label }}</button>
+      </form>
+      {% else %}<a class="action-cta" href="{{ next_step.href }}">{{ next_step.label }}</a>{% endif %}
+    </aside>
+    {% endif %}
 
-  <section class="current-composer" id="composer" aria-label="当前输入">
-    {% if grill_pending %}
+    {% if grill_needs_answer or teach_needs_answer %}
+    <div class="current-composer">
       {% if grill_needs_answer %}
-      <p class="composer-context">回答上面的追问</p>
       <form class="chat-composer" method="post" action="{{ url_for('conversation', error_id=error.id, kind='grill', action='answer') }}" data-action data-draft-key="error-{{ error.id }}-grill">
         {{ credentials(url_for('conversation', error_id=error.id, kind='grill', action='answer')) }}
-        <label class="sr-only" for="grill-answer">你的回答</label>
-        <div class="composer-shell"><textarea id="grill-answer" name="answer" required rows="2" placeholder="写下你的回答；不记得也可以直接说。"></textarea><div class="composer-toolbar"><span class="composer-note">你的回答会先保存，再继续处理</span><button class="send-button" type="submit" aria-label="发送回答" title="发送回答">↑</button></div></div>
+        <label class="sr-only" for="grill-answer">回答</label>
+        <div class="composer-shell"><textarea id="grill-answer" name="answer" rows="2"></textarea><div class="composer-toolbar"><label class="attach-button" for="grill-answer-images" title="添加图片" aria-label="添加图片"><span aria-hidden="true">+</span><span class="attach-label">图片</span><input id="grill-answer-images" class="file-input" name="images" type="file" accept="image/png,image/jpeg,image/webp" multiple></label><button class="send-button" type="submit" aria-label="发送回答" title="发送回答">↑</button></div></div>
       </form>
-      <div class="inline-actions">{{ action(url_for('conversation', error_id=error.id, kind='grill', action='pause'), '稍后继续') }}</div>
-      {% else %}
-      <p class="composer-context">从这里开始，让这次思路慢慢展开。</p>
-      <div class="inline-actions">{{ action(url_for('conversation', error_id=error.id, kind='grill', action='start'), '开始') }}{% if grill %}{{ action(url_for('conversation', error_id=error.id, kind='grill', action='pause'), '稍后继续') }}{% endif %}</div>
-      {% endif %}
-    {% elif teach_available %}
-      {% if teach_needs_answer %}
-      <p class="composer-context">继续写下你还不确定的地方</p>
+      {% elif teach_needs_answer %}
       <form class="chat-composer" method="post" action="{{ url_for('conversation', error_id=error.id, kind='teach', action='answer') }}" data-action data-draft-key="error-{{ error.id }}-teach">
         {{ credentials(url_for('conversation', error_id=error.id, kind='teach', action='answer')) }}
-        <label class="sr-only" for="teach-answer">继续提问或讨论</label>
-        <div class="composer-shell"><textarea id="teach-answer" name="answer" required rows="2" placeholder="把还不清楚的地方写下来。"></textarea><div class="composer-toolbar"><span class="composer-note">可以继续追问</span><button class="send-button" type="submit" aria-label="发送消息" title="发送消息">↑</button></div></div>
+        <label class="sr-only" for="teach-answer">回答</label>
+        <div class="composer-shell"><textarea id="teach-answer" name="answer" rows="2"></textarea><div class="composer-toolbar"><label class="attach-button" for="teach-answer-images" title="添加图片" aria-label="添加图片"><span aria-hidden="true">+</span><span class="attach-label">图片</span><input id="teach-answer-images" class="file-input" name="images" type="file" accept="image/png,image/jpeg,image/webp" multiple></label><button class="send-button" type="submit" aria-label="发送消息" title="发送消息">↑</button></div></div>
       </form>
-      {% if teach %}<div class="inline-actions">{{ action(url_for('conversation', error_id=error.id, kind='teach', action='start'), '继续') }}{{ action(url_for('conversation', error_id=error.id, kind='teach', action='finish'), '保存并退出') }}</div>{% endif %}
-      {% elif teach %}
-      <p class="composer-context">这次讨论已经保存，可以继续。</p>
-      <div class="inline-actions">{{ action(url_for('conversation', error_id=error.id, kind='teach', action='start'), '继续') }}{{ action(url_for('conversation', error_id=error.id, kind='teach', action='finish'), '保存并退出') }}</div>
-      {% else %}
-      <p class="composer-context">从这里开始，一起理解这次错误。</p>
-      <div class="inline-actions">{{ action(url_for('conversation', error_id=error.id, kind='teach', action='start'), '开始') }}</div>
       {% endif %}
+    </div>
     {% endif %}
   </section>
+  {% endif %}
 </section>
 {% endblock %}

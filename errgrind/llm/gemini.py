@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import time
 from collections.abc import Callable
 from typing import Any, Optional
@@ -16,6 +17,7 @@ from .ocr import (
     parse_text_result,
 )
 from .usage import model_attempt, usage_scope
+from .messages import MultimodalMessage
 
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -45,6 +47,25 @@ class GeminiClient:
         system_messages = []
         contents = []
         for m in messages:
+            if isinstance(m, MultimodalMessage):
+                if m.role == "system":
+                    system_messages.append(m.text)
+                    continue
+                role = "model" if m.role == "assistant" else "user"
+                parts = []
+                if m.text:
+                    parts.append({"text": m.text})
+                parts.extend(
+                    {
+                        "inline_data": {
+                            "mime_type": image.mime_type,
+                            "data": base64.b64encode(image.data).decode("ascii"),
+                        }
+                    }
+                    for image in m.images
+                )
+                contents.append({"role": role, "parts": parts})
+                continue
             if m["role"] == "system":
                 system_messages.append(m["content"])
             elif m["role"] == "user":

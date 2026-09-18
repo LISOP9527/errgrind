@@ -16,14 +16,14 @@ Drill 结果；它不引用 CLI、Rich 或 prompt_toolkit。CLI 只负责终端�
 
 ## 本机 Web adapter
 
-第一版 WebUI 使用 Flask/Jinja、少量浏览器 fetch 和单进程 Waitress 线程服务；
-同步请求执行 application 操作，浏览器显示 elapsed time，Drill 准备过程只向用户呈现粗粒度的活动状态。
-每个请求独立打开 SQLite 连接，不把连接跨线程共享。进程内操作保护与一次性表单标识防止重复提交；
-不引入队列或并行 workflow service。
+当前正式 WebUI 使用 React + TypeScript + Vite + assistant-ui 的 `ExternalStoreRuntime`，生产构建仍由
+单个 Flask/Waitress 进程同源提供。React 只拥有 product UI；Flask 与 `ErrGrindApplication` 继续负责
+业务调用、恢复、安全边界和持久化，SQLite 仍是 workflow 的事实来源。每个请求独立打开 SQLite 连接，
+不跨线程共享连接；进程内操作保护与一次性 submission token 防止重复 mutation。
 
-第二前端出现后，`record_error` 与 `prepare_record_draft` 将文本校验、record/ocr 来源、
-草稿整理和创建操作提升到 application，CLI 和 Web 共用。字段 OCR 继续返回需人工校对的草稿。
-Web 只渲染公开对话内容，
-过滤 system 消息，不序列化诊断账本或未提交 Drill 的答案与规格。
-未判分 Drill preparation 暂存当前 Web 进程，判分结果仍通过 application 原子写入 SQLite。
-运行说明与限制见 [WebUI 说明](../README.md)。
+Web 只读取公开 projection，过滤 system 消息，不序列化 Grill 诊断账本、隐藏答案或未提交的内部规格。
+Record 与 conversation 图片使用 durable attachment provenance；未判分 Drill preparation 仍暂存当前 Web
+进程，最终 Judge attempt 与可能派生的 Error 通过 Application 原子写入 SQLite。旧 Jinja 页面只保留为
+hidden fallback / compatibility projection，不定义当前产品信息架构。迁移决策见
+[React + assistant-ui WebUI 正式迁移](decisions/2026-09-14-assistant-ui-migration.md)，运行说明与限制见
+[WebUI 说明](../README.md)。

@@ -112,6 +112,16 @@ class RecordDraft:
     reference_answer: str
     origin: str
 
+    @property
+    def ready(self) -> bool:
+        """Whether the draft has the only field required for confirmation."""
+        return bool(self.question.strip())
+
+    @property
+    def missing_fields(self) -> tuple[str, ...]:
+        """Return deterministic semantic omissions without invoking a model."""
+        return () if self.ready else ("question",)
+
 
 @dataclass(frozen=True)
 class DrillJudgment:

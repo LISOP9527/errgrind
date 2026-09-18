@@ -7,17 +7,24 @@
   <div class="drill-start" aria-live="polite">
     <h1>Drill</h1>
     {% if state == 'preparing' %}
-      <p>正在准备一道题，请稍候。</p>
+      <p class="drill-lead">正在根据历史 Error 生成练习…</p>
     {% elif state == 'failed' %}
-      <p>这次准备没有完成。可以保留当前页面，稍后再试。</p>
-      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action>{{ credentials(url_for('drill_prepare', key=key)) }}<button type="submit">再试一次</button></form>
+      <p class="drill-lead">生成练习失败。</p>
+      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-working-label="正在根据历史 Error 生成练习…">{{ credentials(url_for('drill_prepare', key=key)) }}<button type="submit">重试</button></form>
     {% else %}
-      <p>正在准备一道新的数学题……</p>
-      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-auto-prepare>{{ credentials(url_for('drill_prepare', key=key)) }}<button class="text-action" type="submit">开始</button></form>
+      <div class="drill-intro">
+        <p class="drill-lead">根据历史 Error 生成一题新的练习。</p>
+        <p class="drill-description">开始后会从已完成诊断的 Error 中选择一个目标并生成题目。</p>
+      </div>
+      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-working-label="正在根据历史 Error 生成练习…">{{ credentials(url_for('drill_prepare', key=key)) }}<button type="submit">开始 Drill</button></form>
     {% endif %}
   </div>
   {% else %}
-  <div class="drill-question"><div class="markdown">{{ md(question) }}</div></div>
+  <div class="drill-question">
+    <p class="drill-context">根据历史 Error 生成</p>
+    <div class="markdown">{{ md(question) }}</div>
+  </div>
+  {% if pending_attachment_count %}<p class="attachment-indicator drill-attachment-status">＋ 图片附件已保留，可直接重试提交</p>{% endif %}
   {% if result %}
   <section class="verdict {% if result.is_correct %}correct{% else %}incorrect{% endif %}" aria-live="polite">
     <strong class="verdict-title">{{ '正确' if result.is_correct else '错误' }}</strong>
@@ -33,7 +40,7 @@
   <form class="chat-composer answer-composer" method="post" action="{{ url_for('drill_judge', key=key) }}" data-action data-draft-key="drill-{{ key }}">
     {{ credentials(url_for('drill_judge', key=key)) }}
     <label class="visually-hidden" for="drill-answer">你的答案</label>
-    <div class="composer-shell"><textarea id="drill-answer" name="answer" required rows="3" placeholder="写下你的答案或推理过程……">{{ answer }}</textarea><div class="composer-toolbar"><label class="attach-button" for="drill-answer-image" title="添加答案图片" aria-label="添加答案图片"><span aria-hidden="true">+</span><span class="attach-label">图片</span><input id="drill-answer-image" class="file-input" type="file" accept="image/png,image/jpeg,image/webp" data-drill-ocr data-url="{{ url_for('drill_ocr', key=key) }}" data-token="{{ token(url_for('drill_ocr', key=key)) }}" data-target="drill-answer"></label><span class="composer-note">可以附上草稿图片</span><button class="send-button" type="submit" aria-label="提交答案" title="提交答案">↑</button></div></div>
+    <div class="composer-shell"><textarea id="drill-answer" name="answer" rows="3" placeholder="输入答案…">{{ answer }}</textarea><div class="composer-toolbar"><label class="attach-button" for="drill-answer-images" title="添加图片" aria-label="添加图片"><span aria-hidden="true">+</span><span class="attach-label">图片</span><input id="drill-answer-images" class="file-input" name="images" type="file" accept="image/png,image/jpeg,image/webp" multiple></label><button class="send-button" type="submit" aria-label="提交答案" title="提交答案">↑</button></div></div>
   </form>
   {% endif %}
   {% endif %}

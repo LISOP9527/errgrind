@@ -30,6 +30,9 @@ NEXT_ACTIONS = frozenset(
 )
 PROBE_TYPES = frozenset({"reasoning_question", "variant_problem"})
 _MESSAGE_REF_RE = re.compile(r"^message:([0-9]+)$")
+_ATTACHMENT_REF_RE = re.compile(
+    r"^(?:initial_attachment:[1-9][0-9]*|message:[0-9]+:attachment:[1-9][0-9]*)$"
+)
 
 
 def _object_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -315,9 +318,18 @@ def _validate_state(state: Mapping[str, Any]) -> dict[str, Any]:
             _fail(f"state 中的 evidence {ident} 重复")
         evidence_ids.add(ident)
         source_ref = _text(item["source_ref"], "evidence.source_ref", nonempty=True)
-        if source_ref != "initial_user_thoughts" and _MESSAGE_REF_RE.fullmatch(source_ref) is None:
-            _fail("state evidence.source_ref 只能是 initial_user_thoughts 或 message:N")
-        quote = _text(item["quote"], "evidence.quote", nonempty=True)
+        is_attachment = _ATTACHMENT_REF_RE.fullmatch(source_ref) is not None
+        if (
+            source_ref != "initial_user_thoughts"
+            and _MESSAGE_REF_RE.fullmatch(source_ref) is None
+            and not is_attachment
+        ):
+            _fail(
+                "state evidence.source_ref 只能是 initial_user_thoughts、message:N 或真实图片附件引用"
+            )
+        quote = _text(item["quote"], "evidence.quote", nonempty=not is_attachment)
+        if is_attachment and quote:
+            _fail("图片附件 Evidence 的 quote 必须为空字符串")
         interpretation = _text(
             item["interpretation"], "evidence.interpretation", nonempty=True
         )
@@ -575,6 +587,7 @@ def validate_turn_decision(
     messages: Sequence[Mapping[str, Any]],
     initial_user_thoughts: str | None = None,
     require_latest_user_evidence: bool = False,
+    attachment_refs: set[str] | None = None,
 ) -> GrillTurnDecision:
     """Validate one model delta against the current state and user messages."""
     decision = _decision_mapping(raw)
@@ -622,6 +635,7 @@ def validate_turn_decision(
     if not isinstance(decision["new_evidence"], list):
         _fail("new_evidence 必须是数组")
     addressable = _addressable_messages(messages)
+    attachment_refs = set(attachment_refs or ())
     initial = initial_user_thoughts if isinstance(initial_user_thoughts, str) else None
     known_probes = {
         item["id"] for item in current_state["probes"] if isinstance(item, Mapping)
@@ -639,14 +653,20 @@ def validate_turn_decision(
         }
         _exact_keys(item, expected_evidence, "new_evidence item")
         source_ref = _text(item["source_ref"], "evidence.source_ref", nonempty=True)
-        quote = _text(item["quote"], "evidence.quote", nonempty=True)
+        is_attachment = _ATTACHMENT_REF_RE.fullmatch(source_ref) is not None
+        quote = _text(item["quote"], "evidence.quote", nonempty=not is_attachment)
         interpretation = _text(
             item["interpretation"], "evidence.interpretation", nonempty=True
         )
         supports = _string_list(item["supports"], "evidence.supports")
         contradicts = _string_list(item["contradicts"], "evidence.contradicts")
         _validate_hypothesis_refs(supports, contradicts, hypotheses, "new evidence")
-        if source_ref == "initial_user_thoughts":
+        if is_attachment:
+            if source_ref not in attachment_refs:
+                _fail("evidence source_ref 只能指向真实且已持久化的图片附件")
+            if quote:
+                _fail("图片附件 Evidence 的 quote 必须为空字符串")
+        elif source_ref == "initial_user_thoughts":
             if initial is None or quote not in initial:
                 _fail("initial_user_thoughts 的 quote 必须是精确 substring")
         else:
@@ -728,14 +748,34 @@ def validate_turn_decision(
             _fail("finish_undetermined 的 summary 必须明确当前 Evidence 还不能可靠区分主要解释")
 
     if require_latest_user_evidence:
-        latest = list(addressable)[-1] if addressable else None
-        if latest is None or not any(item["source_ref"] == latest for item in new_evidence):
+        latest_index = None
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if (
+                isinstance(message, Mapping)
+                and message.get("role") == "user"
+                and not _is_bootstrap_user_message(messages, index)
+            ):
+                latest_index = index
+                break
+        latest_sources = set()
+        if latest_index is not None:
+            latest_message = messages[latest_index]
+            if isinstance(latest_message.get("content"), str) and latest_message["content"]:
+                latest_sources.add(f"message:{latest_index}")
+            latest_sources.update(
+                f"message:{latest_index}:attachment:{attachment_id}"
+                for attachment_id in latest_message.get("attachments", [])
+            )
+        if not latest_sources or not any(
+            item["source_ref"] in latest_sources for item in new_evidence
+        ):
             _fail("每次真实用户回答都必须新增一条引用最新 user message 的 Evidence")
         current_probe_id = current_state["current_probe_id"]
         if current_probe_id:
             for item in new_evidence:
                 if (
-                    item["source_ref"] == latest
+                    item["source_ref"] in latest_sources
                     and item["probe_id"] != current_probe_id
                 ):
                     _fail("最新用户回答的 Evidence 必须关联当前 Probe")

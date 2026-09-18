@@ -1,6 +1,7 @@
 """The small application facade used by every frontend."""
 
 from collections.abc import Callable
+from collections.abc import Mapping
 from typing import Optional
 from ..llm.usage import usage_action, usage_scope
 
@@ -20,6 +21,9 @@ from .contracts import (
     public_error,
 )
 from ..models.types import DrillAttemptView
+from ..models.titles import display_title_for_question
+from ..llm.messages import MultimodalMessage
+from .attachments import attachment_tuples, image_parts_from_paths
 from .drill import DrillWorkflow
 from .grill import GrillWorkflow
 from .teach import TeachWorkflow
@@ -35,6 +39,7 @@ RECORD_DRAFT_SCHEMA = {
     "required": ["question", "user_thoughts", "reference_answer"],
     "additionalProperties": False,
 }
+RECORD_DRAFT_FIELDS = ("question", "user_thoughts", "reference_answer")
 
 
 class ErrGrindApplication:
@@ -65,10 +70,12 @@ class ErrGrindApplication:
     def record_error(
         self,
         question: str,
-        user_thoughts: str,
+        user_thoughts: Optional[str],
         reference_answer: Optional[str] = None,
         *,
         origin: str = "record",
+        image_paths: Optional[list[str]] = None,
+        pending_key: Optional[str] = None,
     ):
         """Validate and persist one user-recorded Error.
 
@@ -76,10 +83,10 @@ class ErrGrindApplication:
         the application boundary owns validation, provenance, and the public
         (diagnostic-state-free) return value.
         """
-        if not isinstance(question, str) or not question.strip():
-            raise OutputContractError("题目不能为空")
-        if not isinstance(user_thoughts, str) or not user_thoughts.strip():
-            raise OutputContractError("用户思路不能为空")
+        if not isinstance(question, str):
+            raise OutputContractError("题目必须是文字")
+        if user_thoughts is not None and not isinstance(user_thoughts, str):
+            raise OutputContractError("用户思路必须是文字")
         if reference_answer is not None and not isinstance(reference_answer, str):
             raise OutputContractError("参考答案必须是文字")
         if origin not in {"record", "ocr"}:
@@ -87,9 +94,29 @@ class ErrGrindApplication:
 
         answer = reference_answer.strip() if reference_answer is not None else None
         answer = answer or None
+        thoughts = user_thoughts.strip() if isinstance(user_thoughts, str) else None
+        try:
+            images = image_parts_from_paths(image_paths or [])
+        except Exception as exc:
+            from ..llm.ocr import OcrError
+
+            if isinstance(exc, OcrError):
+                raise OutputContractError(str(exc)) from exc
+            raise WorkflowPersistenceError("读取 Error 图片失败，请重试") from exc
+        has_pending_images = bool(
+            pending_key and self.db.pending_attachment_count(pending_key)
+        )
+        if not question.strip() and not images and not has_pending_images:
+            raise OutputContractError("题目不能为空")
         try:
             error_id = self.db.create_error(
-                question.strip(), user_thoughts.strip(), answer, origin=origin
+                question.strip(),
+                thoughts or None,
+                answer,
+                origin=origin,
+                display_title=display_title_for_question(question),
+                attachments=attachment_tuples(images),
+                pending_key=pending_key,
             )
             error = self.db.get_error(error_id)
         except Exception as exc:
@@ -148,31 +175,48 @@ class ErrGrindApplication:
         return self._transcribe_image_field(image_path, "record_input", action="record")
 
     def prepare_record_draft(
-        self, raw_input: str, image_paths: Optional[list[str]] = None
+        self,
+        raw_input: str,
+        image_paths: Optional[list[str]] = None,
+        *,
+        current_draft: Optional[Mapping[str, str] | RecordDraft] = None,
     ) -> RecordDraft:
         """Organize supplied record material into a draft for human review.
 
-        The prompt explicitly treats user thoughts as optional source material;
-        an empty thoughts field remains empty and is rejected only when the
-        user tries to confirm the Error.
+        Each call is an adjustment to the current editable draft.  Empty
+        semantic fields are valid here: only ``record_error`` enforces the
+        question requirement at the final persistence boundary.
         """
         if not isinstance(raw_input, str):
             raise OutputContractError("录入内容必须是文字")
+        current = self._normalize_record_draft(current_draft)
         image_paths = list(image_paths or [])
-        if not raw_input.strip() and not image_paths:
+        if not raw_input.strip() and not image_paths and not any(current.values()):
             raise OutputContractError("请先输入内容或添加图片")
-        materials = []
-        if raw_input.strip():
-            materials.append("[用户输入的原始内容]\n" + raw_input.strip())
-        for index, image_path in enumerate(image_paths, start=1):
-            text = self.transcribe_record_input(image_path)
-            materials.append(f"[图片 {index} 的忠实转录]\n{text}")
-        source_text = "\n\n".join(materials)
-        prompt = self.prompts.load("record_draft.md").format(source_text=source_text)
+        try:
+            images = image_parts_from_paths(image_paths)
+        except Exception as exc:
+            from ..llm.ocr import OcrError
+
+            if isinstance(exc, OcrError):
+                raise OutputContractError(str(exc)) from exc
+            raise WorkflowModelError("读取图片失败，请重试") from exc
+        source_text = raw_input.strip()
+        prompt = self.prompts.load("record_draft.md").format(
+            source_text=source_text,
+            current_question=current["question"],
+            current_user_thoughts=current["user_thoughts"],
+            current_reference_answer=current["reference_answer"],
+        )
         try:
             with usage_scope(action="record", stage="draft"):
+                messages = [
+                    MultimodalMessage("user", prompt, images)
+                    if images
+                    else {"role": "user", "content": prompt}
+                ]
                 raw = self.llm.chat_json(
-                    [{"role": "user", "content": prompt}],
+                    messages,
                     output_schema=RECORD_DRAFT_SCHEMA,
                 )
         except (KeyboardInterrupt, EOFError):
@@ -181,20 +225,47 @@ class ErrGrindApplication:
             raise WorkflowModelError("整理录入草稿失败，请保留原始内容后重试") from exc
         if not isinstance(raw, dict):
             raise OutputContractError("录入草稿必须是 JSON 对象")
+        if set(raw) != set(RECORD_DRAFT_FIELDS):
+            raise OutputContractError("录入草稿字段结构无效")
         values = {}
-        for field in ("question", "user_thoughts", "reference_answer"):
-            value = raw.get(field, "")
+        for field in RECORD_DRAFT_FIELDS:
+            value = raw[field]
             if not isinstance(value, str):
                 raise OutputContractError(f"录入草稿字段 {field} 必须是文本")
             values[field] = value.strip()
-        if not values["question"]:
-            raise OutputContractError("草稿中没有题目，请补充题目后再确认")
         return RecordDraft(
             question=values["question"],
             user_thoughts=values["user_thoughts"],
             reference_answer=values["reference_answer"],
-            origin="ocr" if image_paths else "record",
+            origin="record",
         )
+
+    @staticmethod
+    def _normalize_record_draft(
+        current_draft: Optional[Mapping[str, str] | RecordDraft],
+    ) -> dict[str, str]:
+        """Validate the editable state before placing it in a model prompt."""
+        if current_draft is None:
+            return {field: "" for field in RECORD_DRAFT_FIELDS}
+        if isinstance(current_draft, RecordDraft):
+            source = {
+                field: getattr(current_draft, field)
+                for field in RECORD_DRAFT_FIELDS
+            }
+        elif isinstance(current_draft, Mapping):
+            source = {
+                field: current_draft.get(field, "")
+                for field in RECORD_DRAFT_FIELDS
+            }
+        else:
+            raise OutputContractError("当前录入草稿必须是对象")
+        values = {}
+        for field in RECORD_DRAFT_FIELDS:
+            value = source[field]
+            if not isinstance(value, str):
+                raise OutputContractError(f"当前录入草稿字段 {field} 必须是文本")
+            values[field] = value.strip()
+        return values
 
     @usage_action("drill", "ocr_answer")
     def transcribe_drill_answer(self, image_path: str) -> str:
@@ -216,10 +287,11 @@ class ErrGrindApplication:
         error_id: int,
         answer: str,
         *,
+        image_paths: Optional[list[str]] = None,
         on_token: Optional[Callable[[str], None]] = None,
     ) -> GrillResult:
         return GrillWorkflow(self.db, self.llm, self.prompts).submit_answer(
-            error_id, answer, on_token=on_token
+            error_id, answer, image_paths=image_paths, on_token=on_token
         )
 
     def pause_grill(self, error_id: int) -> GrillResult:
@@ -240,10 +312,14 @@ class ErrGrindApplication:
         error_id: int,
         answer: str,
         *,
+        image_paths: Optional[list[str]] = None,
         before_model_call: Optional[Callable[[], None]] = None,
     ) -> ConversationResult:
         return TeachWorkflow(self.db, self.llm, self.prompts).submit_answer(
-            error_id, answer, before_model_call=before_model_call
+            error_id,
+            answer,
+            image_paths=image_paths,
+            before_model_call=before_model_call,
         )
 
     def finish_teach(self, error_id: int) -> ConversationResult:
@@ -257,11 +333,74 @@ class ErrGrindApplication:
         )
 
     def judge_and_record_drill(
-        self, preparation: DrillPreparation, user_response: str
+        self,
+        preparation: DrillPreparation,
+        user_response: str,
+        *,
+        image_paths: Optional[list[str]] = None,
+        pending_key: Optional[str] = None,
     ) -> DrillJudgment:
         return DrillWorkflow(
             self.db, self.llm, self.prompts, self.cfg
-        ).judge_and_record(preparation, user_response)
+        ).judge_and_record(
+            preparation,
+            user_response,
+            image_paths=image_paths,
+            pending_key=pending_key,
+        )
+
+    def get_error_attachment_count(
+        self, error_id: int, *, conversation_kind: Optional[str] = "initial"
+    ) -> int:
+        return len(
+            self.db.list_error_attachments(
+                error_id, conversation_kind=conversation_kind
+            )
+        )
+
+    def list_error_attachments(
+        self, error_id: int, *, conversation_kind: Optional[str] = None
+    ):
+        """Return attachments belonging to one Error for a frontend adapter.
+
+        The web adapter may expose only metadata or bytes from these returned
+        records after it has checked the owning Error.  Keeping this lookup at
+        the application boundary avoids teaching the frontend about SQLite.
+        """
+        return self.db.list_error_attachments(
+            error_id, conversation_kind=conversation_kind
+        )
+
+    def get_error_attachment(self, error_id: int, attachment_id: int):
+        """Return one attachment only when it belongs to ``error_id``."""
+        try:
+            matches = self.db.get_attachments_for_ids([attachment_id], error_id=error_id)
+        except (TypeError, ValueError):
+            return None
+        return matches[0] if matches else None
+
+    def append_pending_image_attachments(
+        self, pending_key: str, image_paths: list[str]
+    ) -> int:
+        """Durably stage original user images before a fallible model call."""
+        try:
+            images = image_parts_from_paths(image_paths)
+        except Exception as exc:
+            from ..llm.ocr import OcrError
+            if isinstance(exc, OcrError):
+                raise OutputContractError(str(exc)) from exc
+            raise WorkflowPersistenceError("读取图片失败，请重试") from exc
+        try:
+            self.db.append_pending_attachments(pending_key, attachment_tuples(images))
+        except Exception as exc:
+            raise WorkflowPersistenceError("暂存图片失败，请重试") from exc
+        return self.db.pending_attachment_count(pending_key)
+
+    def get_pending_attachment_count(self, pending_key: str) -> int:
+        return self.db.pending_attachment_count(pending_key)
+
+    def delete_pending_attachments(self, pending_key: str) -> None:
+        self.db.delete_pending_attachments(pending_key)
 
     def list_drill_history(self) -> list[DrillAttemptView]:
         """Return only the question and target mechanism for every judged Drill."""

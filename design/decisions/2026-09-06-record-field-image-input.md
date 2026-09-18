@@ -1,5 +1,9 @@
 # 在录题字段内整合图片识别
 
+> Superseded for Web (2026-09-11): the Web no longer offers per-field OCR or
+> transcribe-then-edit. Images go with the Record draft request, then the
+> returned structured fields remain user-editable before confirmation.
+
 ## Context
 
 题目、学生思路和参考答案经常分布在不同截图。独立 `/ocr` 一次识别整张图的三个字段，

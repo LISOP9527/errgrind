@@ -1,6 +1,7 @@
 """Recovery and untrusted-content checks for the optional local adapter."""
 import io
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -66,7 +67,7 @@ class WebRecoveryTests(unittest.TestCase):
         self.assertEqual(self.db.get_error(self.error_id).status, 'pending-teach')
         self.assertEqual(sum(m['content'] == '当时没有核对条件' for m in json.loads(self.db.get_error(self.error_id).grilling_conversation)), 1)
 
-    def test_teach_answer_survives_failure_then_finish_and_resume(self):
+    def test_teach_answer_survives_failure_then_ui_resume_and_drill(self):
         self.complete_grill()
         self.assertEqual(self.post('teach', 'start').status_code, 200)
         with patch.object(self.llm, 'chat', side_effect=RuntimeError('OAUTH_SECRET')):
@@ -75,36 +76,83 @@ class WebRecoveryTests(unittest.TestCase):
         self.assertNotIn(b'OAUTH_SECRET', response.data)
         history = json.loads(self.db.get_error(self.error_id).teach_conversation)
         self.assertEqual(history[-1]['content'], '我还不理解这个条件')
-        self.assertEqual(self.post('teach', 'start').status_code, 200)
-        self.assertEqual(self.post('teach', 'finish').status_code, 200)
-        self.assertEqual(self.db.get_error(self.error_id).status, 'done')
-        calls = self.llm.chat_calls
-        self.assertEqual(self.post('teach', 'start').status_code, 200)
-        self.assertEqual(self.llm.chat_calls, calls)
 
-    def test_ocr_failure_removes_file_and_does_not_write_record(self):
-        page = self.client.get('/record')
+        recovery = self.client.get(f'/errors/{self.error_id}')
+        csrf, token = _credentials(recovery.data, f'/errors/{self.error_id}/teach/start')
+        self.assertIn(b'>Teach<', recovery.data)
+        self.assertEqual(self.client.post(
+            f'/errors/{self.error_id}/teach/start',
+            data={'csrf': csrf, 'submit_token': token},
+            headers={'Accept': 'application/json'},
+        ).status_code, 200)
+        history = json.loads(self.db.get_error(self.error_id).teach_conversation)
+        self.assertEqual(sum(m['content'] == '我还不理解这个条件' for m in history), 1)
+
+        resumed = self.client.get(f'/errors/{self.error_id}')
+        csrf, token = _credentials(resumed.data, f'/errors/{self.error_id}/teach/drill')
+        self.assertIn(b'>Drill<', resumed.data)
+        self.assertEqual(self.client.post(
+            f'/errors/{self.error_id}/teach/drill',
+            data={'csrf': csrf, 'submit_token': token},
+            headers={'Accept': 'application/json'},
+        ).status_code, 200)
+        self.assertEqual(self.db.get_error(self.error_id).status, 'done')
+
+    def test_direct_image_draft_failure_removes_temp_file_and_does_not_write_record(self):
+        page = self.client.get('/')
         form = _form(page.data)
         csrf = form['values']['csrf']
-        path = '/record/ocr/user_thoughts'
         files = []
-        def failing(filename, prompt):
+        draft_token = re.search(
+            rb'data-draft-submit data-draft-url="[^"]+" data-submit-token="([^"]+)"',
+            page.data,
+        ).group(1).decode()
+        from errgrind.llm.ocr import load_image as real_load_image
+        def checking_loader(filename):
             files.append(filename)
             self.assertTrue(Path(filename).is_file())
-            raise RuntimeError('OCR_SECRET')
-        with patch.object(self.llm, 'transcribe_image', side_effect=failing):
-            response = self.client.post(path, data={
-                'csrf': csrf, 'submit_token': form['ocr'][path],
-                'image': (io.BytesIO(b'\x89PNG\r\n\x1a\nimage'), '../../escape.png'),
-            }, headers={'Accept': 'application/json'})
+            return real_load_image(filename)
+        with patch('errgrind.web.app.load_image', side_effect=checking_loader), \
+             patch.object(self.llm, 'chat_json', side_effect=RuntimeError('PROVIDER_SECRET')):
+            response = self.client.post('/api/record/draft', data={
+                'csrf': csrf, 'submit_token': draft_token,
+                'raw_input': '题目文字',
+                'images': (io.BytesIO(b'\x89PNG\r\n\x1a\nimage'), '../../escape.png'),
+            }, content_type='multipart/form-data', headers={'Accept': 'application/json'})
         self.assertEqual(response.status_code, 502)
-        self.assertNotIn(b'OCR_SECRET', response.data)
+        self.assertNotIn(b'PROVIDER_SECRET', response.data)
         self.assertEqual(len(files), 1)
         self.assertFalse(Path(files[0]).exists())
         self.assertEqual(len(self.db.list_all_errors()), 1)
 
+    def test_image_count_limit_rejects_before_model_call(self):
+        page = self.client.get('/')
+        csrf = _form(page.data)['values']['csrf']
+        token = re.search(
+            rb'data-draft-submit data-draft-url="[^"]+" data-submit-token="([^"]+)"',
+            page.data,
+        ).group(1).decode()
+        data = {
+            'csrf': csrf,
+            'submit_token': token,
+            'raw_input': '题目文字',
+            'images': [
+                (io.BytesIO(b'\x89PNG\r\n\x1a\nimage'), f'upload-{index}.png')
+                for index in range(4)
+            ],
+        }
+        response = self.client.post(
+            '/api/record/draft',
+            data=data,
+            content_type='multipart/form-data',
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.llm.chat_json_calls, 0)
+        self.assertEqual(len(self.db.list_all_errors()), 1)
+
     def test_csrf_and_cross_origin_rejected_without_mutation(self):
-        page = self.client.get('/record')
+        page = self.client.get('/')
         csrf, token = _credentials(page.data, '/record')
         data = dict(csrf=csrf, submit_token=token, question='Q', user_thoughts='T')
         response = self.client.post('/record', data=data, headers={'Origin': 'https://attacker.example', 'Accept': 'application/json'})
@@ -168,7 +216,7 @@ class WebRecoveryTests(unittest.TestCase):
     def test_missing_config_still_allows_text_recording(self):
         app = create_app(db_path=self.path, cfg={}, secret_key='no-model')
         client = app.test_client()
-        page = client.get('/record')
+        page = client.get('/')
         self.assertIn('尚未配置可用模型'.encode(), page.data)
         form = _form(page.data)
         response = client.post('/record', data=dict(form['values'], question='题目', user_thoughts='没有思路'))

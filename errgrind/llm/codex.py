@@ -19,6 +19,7 @@ from typing import Any
 
 from .codex_transport import CodexResponsesTransport, CodexTransportError
 from .usage import model_attempt, usage_scope
+from .messages import MultimodalMessage
 from .ocr import (
     OCR_OUTPUT_SCHEMA, TEXT_OUTPUT_SCHEMA, load_image,
     parse_ocr_result, parse_text_result,
@@ -135,6 +136,31 @@ class CodexClient:
         instructions: list[str] = []
         inputs: list[dict] = []
         for message in messages:
+            if isinstance(message, MultimodalMessage):
+                if message.role not in ("user", "assistant", "developer"):
+                    raise CodexError("Codex 直连不接受该消息 role")
+                content = []
+                if message.text:
+                    content.append(
+                        {
+                            "type": "output_text"
+                            if message.role == "assistant"
+                            else "input_text",
+                            "text": message.text,
+                        }
+                    )
+                content.extend(
+                    {
+                        "type": "input_image",
+                        "image_url": (
+                            f"data:{image.mime_type};base64,"
+                            f"{base64.b64encode(image.data).decode('ascii')}"
+                        ),
+                    }
+                    for image in message.images
+                )
+                inputs.append({"role": message.role, "content": content})
+                continue
             role = message.get("role", "user")
             content = message.get("content", "")
             if role == "system":

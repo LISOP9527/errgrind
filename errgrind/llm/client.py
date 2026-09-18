@@ -1,12 +1,14 @@
 import os
 import json
 import time
+import base64
 from collections.abc import Callable
 from typing import Optional
 from urllib.parse import urlsplit
 
 from .ocr import TEXT_OUTPUT_SCHEMA, OCR_OUTPUT_SCHEMA, load_image, parse_ocr_result, parse_text_result
 from .usage import model_attempt, usage_scope
+from .messages import MultimodalMessage
 
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -65,6 +67,31 @@ class LLMClient:
         except TypeError:
             return None
 
+    @staticmethod
+    def _wire_messages(messages: list) -> list[dict]:
+        """Map the shared message value to OpenAI-compatible content parts."""
+        result = []
+        for message in messages:
+            if not isinstance(message, MultimodalMessage):
+                result.append(message)
+                continue
+            parts = []
+            if message.text:
+                parts.append({"type": "text", "text": message.text})
+            parts.extend(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": (
+                            f"data:{image.mime_type};base64,"
+                            f"{base64.b64encode(image.data).decode('ascii')}"
+                        )
+                    },
+                }
+                for image in message.images
+            )
+            result.append({"role": message.role, "content": parts})
+        return result
     def chat(self, messages: list[dict], **kwargs) -> str:
         for attempt in range(self.max_retries):
             try:
@@ -76,7 +103,7 @@ class LLMClient:
                 ) as usage:
                     resp = self.client.chat.completions.create(
                         model=self.model,
-                        messages=messages,
+                        messages=self._wire_messages(messages),
                         **kwargs,
                     )
                     usage.record_usage(self._usage_dict(getattr(resp, "usage", None)), "openai")
@@ -110,7 +137,7 @@ class LLMClient:
                     stream_kwargs = dict(kwargs)
                     response = self.client.chat.completions.create(
                         model=self.model,
-                        messages=messages,
+                        messages=self._wire_messages(messages),
                         stream=True,
                         **stream_kwargs,
                     )

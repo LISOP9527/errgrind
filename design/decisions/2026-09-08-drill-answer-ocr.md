@@ -1,5 +1,8 @@
 # Drill 答题图片输入
 
+> Superseded for Web (2026-09-11): Web Drill sends text and zero or more images
+> directly to Judge. The old OCR helper may remain only for legacy CLI callers.
+
 ## Context
 
 数学演练的答案与演算常写在纸上。Drill 答题需要复用录题已有的图片输入能力，让用户

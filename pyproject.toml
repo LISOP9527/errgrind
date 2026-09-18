@@ -29,4 +29,4 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 
 [tool.setuptools.package-data]
-"errgrind.web" = ["templates/*.html", "static/*.css", "static/*.js", "static/vendor/*", "static/vendor/fonts/*"]
+"errgrind.web" = ["templates/*.html", "static/*.css", "static/*.js", "static/assistant-ui/*.html", "static/assistant-ui/assets/*", "static/vendor/*", "static/vendor/fonts/*"]
