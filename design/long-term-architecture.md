@@ -32,7 +32,9 @@ Teach、Drill 或其他干预之后的观察仍可保存为审计记录，但当
 
 - authentic Error；
 - 录题时的 initial user thoughts；
-- Grill 中真实的用户回答。
+- Grill 中真实的用户回答；
+- 用户上传并持久保存的原始图片附件。附件本身是 artifact Evidence，必须保留 attachment
+  provenance；它可以作为 Grill 的 grounded Evidence source，但图片内容的模型转录不是用户逐字引文。
 
 如果用户在当前对话中产生新的 Error，而该 Error 无法归因于原始 Error 的 mechanism，它不能作为原始诊断的区分性 Evidence；可以保存为观察，但不得写成支持或反驳原始机制的因果证据。
 

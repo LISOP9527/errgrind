@@ -151,9 +151,9 @@ Application/core 继续作为业务规则的统一权威边界，SQLite 中的 E
 
 ### UI infrastructure 与复用策略
 
-V1 第一版继续完成当前 thin WebUI，不为了“发现了更成熟的聊天 UI 框架”而在临近可用时整体重写。
-当前 WebUI 已经承担了真实 Error workspace、Grill / Teach timeline、Drill、输入恢复、安全边界和移动端适配；
-在核心交互仍快速变化时切换 frontend stack，会把产品验证重新变成迁移工程。
+当前 React + assistant-ui WebUI 已经承担真实 Error workspace、Grill / Teach timeline、Drill、输入恢复、
+安全边界和移动端适配。正式迁移已完成，后续应围绕实际使用验证和小范围迭代推进，避免把产品验证重新变成
+重复迁移工程。
 
 但当前实现不应被理解为长期承诺“所有 Web primitive 都自己维护”。这次 WebUI 设计暴露出的经验是：
 

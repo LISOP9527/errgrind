@@ -10,6 +10,7 @@ try:
     from errgrind.application import ErrGrindApplication
     from errgrind.db.ops import Database
     from errgrind.llm.prompts import PromptManager
+    from errgrind.llm.messages import MultimodalMessage
     from tests.test_web import _FakeLLM
 except ImportError:
     create_app = None
@@ -19,8 +20,8 @@ class FakeAssistantApplication:
     def __init__(self):
         self.calls = []
 
-    def prepare_record_draft(self, raw_input, image_paths, *, current_draft):
-        self.calls.append(('draft', raw_input, list(image_paths), current_draft))
+    def prepare_record_draft(self, raw_input, image_paths, *, current_draft, pending_key=None):
+        self.calls.append(('draft', raw_input, list(image_paths), current_draft, pending_key))
         return RecordDraft('', '', '', 'record')
 
     def record_error(self, question, user_thoughts, reference_answer, *, origin, image_paths, pending_key=None):
@@ -147,6 +148,7 @@ class AssistantApiTests(unittest.TestCase):
         draft_calls = [call for call in self.application.calls if call[0] == 'draft']
         self.assertEqual(len(draft_calls), 1)
         self.assertEqual(len(draft_calls[0][2]), 1)
+        self.assertTrue(draft_calls[0][4])
         self.assertTrue(any(call[0] == 'pending_append' for call in self.application.calls))
 
     def test_image_only_grill_answer_is_not_treated_as_empty(self):
@@ -277,6 +279,9 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(revised.status_code, 200)
         self.assertEqual(revised.get_json()['pending_attachment_count'], 1)
+        revised_message = llm.messages[-1][0]
+        self.assertIsInstance(revised_message, MultimodalMessage)
+        self.assertEqual([image.data for image in revised_message.images], [png])
 
         # Finalization no longer depends on re-uploading a browser File object.
         finalized = client.post(
@@ -320,6 +325,54 @@ class AssistantApiTests(unittest.TestCase):
         self.assertTrue(answered.get_json()['assistant_response'])
         self.assertTrue(draft_payload['ready'])
         db.close()
+
+    def test_failed_record_draft_retry_reuses_durable_pending_image(self):
+        db = Database(str(self.temp.name + '/retry.db'))
+        self.addCleanup(db.close)
+        llm = _FakeLLM()
+        llm.fail = True
+        application = ErrGrindApplication(db, llm, PromptManager())
+        web = create_app(application=application, secret_key='assistant-retry-boundary')
+        client = web.test_client()
+        csrf, tokens = self._bootstrap_for(client)
+        png = b'\x89PNG\r\n\x1a\npending-retry-image'
+
+        failed = client.post(
+            '/api/assistant/record/draft',
+            data={
+                'raw_input': '',
+                'question': '', 'user_thoughts': '', 'reference_answer': '',
+                'images': (io.BytesIO(png), 'retry.png'),
+            },
+            content_type='multipart/form-data',
+            headers={
+                'X-CSRFToken': csrf,
+                'X-Submission-Token': tokens['record_draft'],
+            },
+        )
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(
+            client.get('/assistant-ui/bootstrap').get_json()['record_pending_attachment_count'],
+            1,
+        )
+
+        llm.fail = False
+        retried = client.post(
+            '/api/assistant/record/draft',
+            data={
+                'raw_input': '补充说明',
+                'question': '', 'user_thoughts': '', 'reference_answer': '',
+            },
+            content_type='multipart/form-data',
+            headers={
+                'X-CSRFToken': csrf,
+                'X-Submission-Token': failed.get_json()['submit_token'],
+            },
+        )
+        self.assertEqual(retried.status_code, 200)
+        message = llm.messages[-1][0]
+        self.assertIsInstance(message, MultimodalMessage)
+        self.assertEqual([image.data for image in message.images], [png])
 
     @staticmethod
     def _bootstrap_for(client):

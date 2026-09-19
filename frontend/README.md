@@ -6,7 +6,8 @@
 # terminal 1, repository root
 .venv/bin/errgrind web --port 8765 --db /tmp/errgrind-webui.db
 
-# 开发时可选：另开终端运行 Vite
+# terminal 2, repository root
+cd frontend
 npm ci
 npm run dev
 ```

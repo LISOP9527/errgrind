@@ -47,21 +47,25 @@ has field-level media semantics.
 
 ## Consequences and explicit limitation
 
-The spike can finalize a draft with a non-empty text question and preserve all
-original uploaded files as Error attachments. Grill then starts in the same
-conversation workspace and can receive a further answer without navigation.
-The current `ErrorRecord` text columns and `record_error()` contract cannot
-finalize an image-only semantic question, nor persist which original image is
-part of which semantic field. The API reports this as
+本节记录 spike 当时的限制；后续正式迁移决策和实现已改变其中的 Record 持久化结论。
+
+At the time of this spike, it could finalize only a draft with a non-empty text
+question and preserve uploaded files as Error attachments. The current
+`ErrorRecord` text columns also could not persist which original image was part
+of which semantic field. The API reported this as
 `legacy-text-plus-initial-original-attachments`; the UI displays the limitation
 near the draft. It must not OCR or flatten an image merely to satisfy the
 legacy column. A production change would require a small field-content
 relation/JSON contract storing ordered text parts and original attachment IDs,
 with provenance and migration rules; this spike deliberately does not migrate
-the production schema.
+the production schema. The production implementation subsequently added durable
+pending attachments and permits a pure-image Record confirmation, while the
+field-level semantic limitation remains.
 
-Pre-finalization draft/messages live in React memory and a small
-`sessionStorage` text draft. Original `File` objects are kept only in memory so
-refresh-safe attachment recovery is intentionally deferred. The existing
-CSRF, same-origin, one-time mutation-token, upload validation, and provider
-error-redaction boundaries remain in force.
+During the spike, pre-finalization draft/messages lived in React memory and a
+small `sessionStorage` text draft, while original `File` objects were kept only
+in memory. The production implementation now writes uploaded Record images to
+server-side pending attachments before the model call, so refresh and model
+failure recovery reuse those bytes. The existing CSRF, same-origin, one-time
+mutation-token, upload validation, and provider error-redaction boundaries
+remain in force.

@@ -877,6 +877,7 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
                 request_value('raw_input', ''),
                 paths,
                 current_draft=current_draft,
+                pending_key=pending_key,
             )
         pending_attachment_count = api.get_pending_attachment_count(pending_key)
         return jsonify(

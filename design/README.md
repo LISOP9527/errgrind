@@ -30,7 +30,7 @@
 - [assistant-ui conversation workspace spike](decisions/2026-09-14-assistant-ui-spike.md)：用 ExternalStoreRuntime 验证可替换的对话 UI 基础设施，并记录当前 Record 字段级图片语义的持久化限制。
 - [React + assistant-ui WebUI 正式迁移](decisions/2026-09-14-assistant-ui-migration.md)：将 React 工作区接入单端口生产服务，保留 Flask/Application/SQLite 业务权威和原始附件限制。
 - [Evidence 来源与 Drill Action Ledger](decisions/2026-09-01-evidence-provenance-drill-ledger.md)：记录 Error 来源、Drill 判分与衍生 Error 的可追溯关系。
-- [暂缓 Pattern Observation 校验](decisions/2026-09-02-defer-pattern-observation-validation.md)：当前 MVP 直接使用 `grilling_summary`，暂不引入结构化 Observation 与 Evidence 校验。
+- [暂缓长期 Pattern Observation 校验](decisions/2026-09-02-defer-pattern-observation-validation.md)：跨 Error 的 Observation 与 promotion 仍 deferred；本次 episode-level structured Grill 由 2026-09-04 ADR 约束。
 - [Application 工作流边界](decisions/2026-09-03-application-workflow-boundary.md)：Grill、Teach、Drill 通过 UI 无关 façade 供未来前端复用。
 - [Grill 作为主动诊断](decisions/2026-09-04-grill-as-active-diagnosis.md)：Grill 通过区分候选解释收集 Evidence；一次结果只是 episode-level diagnosis，长期 Pattern 需跨证据支持。
 - [结构化 Grill 诊断与变式 Probe](decisions/2026-09-04-structured-grill-diagnosis-and-variant-probes.md)：每个 Error 保存 grounded Evidence、确定性诊断 delta merge 和显式 reasoning/variant Probe；长期 Pattern 仍 deferred。

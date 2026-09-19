@@ -96,13 +96,23 @@ export type ConversationResponse = {
 };
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) { super(message); }
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly submitToken?: string,
+  ) { super(message); }
 }
 
 async function jsonRequest<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, body.error || "请求未完成，请保留当前输入后重试。");
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      body.error || "请求未完成，请保留当前输入后重试。",
+      typeof body.submit_token === "string" ? body.submit_token : undefined,
+    );
+  }
   return body as T;
 }
 

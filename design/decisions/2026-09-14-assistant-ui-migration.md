@@ -9,7 +9,9 @@ ErrGrind WebUI 需要在一个 `errgrind web` 进程内提供生产可用的 Rea
 - `/` 与 `/errors/<id>` 提供包内构建的 React + assistant-ui shell；`/drill` 与 `/config` 暂时保留 Jinja。
 - React 只负责对话呈现、输入、附件预览与导航；Record 草稿、Error finalize、Grill、Teach、Next Step 与 Teach → Drill 仍调用现有 Application 操作。
 - Flask 提供最小公开 bootstrap、Error workspace 与同源附件读取投影。公开投影不包含 `grilling_diagnostic_state`、隐藏答案键或内部 prompt 状态；附件读取必须按 Error 所有权校验。
-- 当前 TEXT 字段与初始附件持久化契约保持不变。图片作为可编辑/确认的原始附件保留，不伪造字段级多模态语义，也不通过 OCR 扁平化来填充旧字段。
+- 当前 TEXT 字段与初始附件持久化契约保持不变；有原始图片时允许文字 `question` 为空，
+  因此可以确认纯图片题目。图片作为可编辑/确认的原始附件保留，不伪造字段级多模态语义，
+  也不通过 OCR 扁平化来填充旧字段。
 - assistant-ui attachment adapter 按附件 id/ref 保存 File，并从 `incoming.attachments` 与 image parts 两处解析，以支持纯图片 Record、Grill 与 Teach 消息。
 
 ## Rationale
@@ -18,7 +20,9 @@ ErrGrind WebUI 需要在一个 `errgrind web` 进程内提供生产可用的 Rea
 
 ## Consequences
 
-Record 是连续对话中的结构化草稿展示，而不是三个 textarea；题目缺失是可继续的中间状态。现有 Error 的上下文、Grill/Teach 对话、单一诊断摘要、附件与 Next Step 在同一 React 工作区呈现。字段级图片含义与更深的多模态 schema 留给后续 Core 变更。
+Record 是连续对话中的结构化草稿展示，而不是三个 textarea；题目缺失在没有附件时仍是可继续的中间状态，
+  有附件时可以直接确认。现有 Error 的上下文、Grill/Teach 对话、单一诊断摘要、附件与 Next Step 在同一
+React 工作区呈现。字段级图片含义与更深的多模态 schema 留给后续 Core 变更。
 
 ## Follow-up status
 

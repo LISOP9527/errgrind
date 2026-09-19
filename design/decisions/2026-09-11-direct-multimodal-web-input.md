@@ -32,6 +32,8 @@ provider 看到用户实际上传的 artifact，保留 Record 的人工确认边
 
 ## Consequences
 
-确认 Record 后原图会成为 Error provenance 的一部分；图片不会在公共 HTML 中回显缩略图，只有
-紧凑附件标记。pending Drill 的字节依赖当前 Web 进程持有的 key；若进程重启，未判分的临时
-练习仍需重新 Prepare。旧 CLI OCR 方法和 prompt 可暂留，但 Web 不再调用 OCR route 或 transcribe。
+确认 Record 后原图会成为 Error provenance 的一部分；消息附件在 Web 对话中按授权 URL 显示为图片，
+公共投影仍不会显示模型转录。Record 的 pending attachment 在确认前也由服务端持久暂存，因此
+纯图片题目和模型失败后的刷新恢复都不依赖浏览器继续持有 `File`。pending Drill 的字节仍依赖
+当前 Web 进程持有的 key；若进程重启，未判分的临时练习仍需重新 Prepare。旧 CLI OCR 方法和
+prompt 可暂留，但 Web 不再调用 OCR route 或 transcribe。

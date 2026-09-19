@@ -13,6 +13,7 @@ from errgrind.application import (
 )
 from errgrind.db.ops import Database
 from errgrind.llm.ocr import OcrError
+from errgrind.llm.messages import MultimodalMessage
 from errgrind.llm.prompts import PromptManager
 
 
@@ -123,6 +124,40 @@ class RecordImageApplicationTests(unittest.TestCase):
         draft = self.app.prepare_record_draft("只有题目和答案")
         self.assertEqual(draft.user_thoughts, "")
         self.assertEqual(self.db.mock_calls, [])
+
+
+class PendingRecordDraftApplicationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db = Database(str(Path(self.temp_dir.name) / "drafts.db"))
+        self.llm = Mock()
+        self.llm.chat_json.return_value = {
+            "question": "题目",
+            "user_thoughts": "",
+            "reference_answer": "",
+        }
+        self.app = ErrGrindApplication(self.db, self.llm, PromptManager())
+        self.image = Path(self.temp_dir.name) / "record.png"
+        self.image.write_bytes(b"\x89PNG\r\n\x1a\npending-record")
+
+    def tearDown(self):
+        self.db.close()
+        self.temp_dir.cleanup()
+
+    def test_pending_and_direct_duplicate_image_is_sent_once(self):
+        pending_key = "record-retry"
+        self.app.append_pending_image_attachments(pending_key, [str(self.image)])
+
+        self.app.prepare_record_draft(
+            "补充说明",
+            [str(self.image)],
+            current_draft={"question": "", "user_thoughts": "", "reference_answer": ""},
+            pending_key=pending_key,
+        )
+
+        message = self.llm.chat_json.call_args.args[0][0]
+        self.assertIsInstance(message, MultimodalMessage)
+        self.assertEqual([image.data for image in message.images], [self.image.read_bytes()])
 
 
 class RecordErrorApplicationTests(unittest.TestCase):

@@ -16,9 +16,11 @@ Record 不是一次提交即结束的整理请求。第一次输入和之后每�
 3. 成功后返回更新后的可编辑预览和确定性的 ready/incomplete 状态。原始补充输入被清空，
    用户可以继续输入下一轮；图片仍作为当前待确认图片，直到最终保存或用户替换它们。
 
-`question` 是确认保存前唯一必须补齐的字段；参考答案可选，`user_thoughts` 仍可缺失，
-并且不能由模型为了完整性自行补写。所有中间草稿只存在于页面/sessionStorage，不能创建
-SQLite Error。只有用户确认时才调用 `record_error`，由它执行最终的非空题目校验和持久化。
+文字 `question` 是确认保存前的通常必填字段；如果当前草稿已有一张或多张原始图片，
+则允许将纯图片作为题目完成确认，文字字段保持为空。参考答案可选，`user_thoughts` 仍可缺失，
+并且不能由模型为了完整性自行补写。中间草稿字段可在页面/sessionStorage 中恢复，但已上传的
+图片会立即写入服务端 pending attachment，刷新或模型失败后仍可继续使用；只有用户确认时才调用
+`record_error`，由它把 pending 图片原子归属到新 Error，并执行文字或图片输入的最终校验。
 
 模型返回的草稿仍然只是可编辑预览：用户可以多轮补充和手动修订，必须校对并确认后才创建
 `pending-grill` Error。
@@ -29,7 +31,7 @@ SQLite Error。只有用户确认时才调用 `record_error`，由它执行最�
 
 - Grill、Teach 和 Drill 使用统一的 `+ 图片` 附件入口。文字可以为空，但至少要有文字或图片。
 - 图片随具体 Error conversation turn 或 Drill attempt 保存；模型失败后，刷新页面可以重试而
-  不必重新上传。公共时间线只显示紧凑附件标记，不显示模型转录。
+  不必重新上传。对话消息直接显示已保存的图片附件，不显示模型转录。
 - Grill 的图片 Evidence 使用 durable attachment reference，`quote` 必须为空；真实文字
   Evidence 仍必须通过 exact-substring 校验。图片不是模型生成的用户逐字引文。
 - Drill Judge 直接接收文字和图片。答错派生 Error 时复制相关附件，因此不会把图像答案降级为

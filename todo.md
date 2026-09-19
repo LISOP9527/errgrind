@@ -1,6 +1,22 @@
 # 当前进度与验证记录
 
+## 2026-09-19：Web 恢复契约与文档校准
+
+- Record 草稿的服务端 pending 图片现在由 Application 在每次整理时重新读取，模型失败后的纯文字重试仍能看到已上传图片，相同字节不重复发送。
+- React 保留失败响应中的新一次性 token；Record finalize 成功后即切换到已持久化 Error，后续 Grill 失败不会重复建 Error。
+- README、Record/多模态/架构设计、ADR 索引与版本计划已按当前 React + assistant-ui、纯图片 Record、图片消息显示与 structured Grill 实现同步。
+- 验证：安装 Web extra 后完整回归 **310 项通过**；基础依赖环境下 Web 测试按预期 skip；`npm run typecheck`、`npm run build`、56 个 Markdown 文件的本地链接检查与 `git diff --check` 通过。
+
+## 2026-09-14：React + assistant-ui WebUI 迁移
+
+- 正式 React + assistant-ui workspace 已接入同一个 `errgrind web` 进程；生产由 Flask/Waitress 提供包内构建产物，React 负责对话呈现、输入、附件与导航，`ErrGrindApplication`、SQLite、CSRF、一次性 token 和 provenance 继续作为权威边界。
+- `/`、Error workspace、Drill、Settings 和 Record/Grill/Teach 的附件交互已纳入同一套前端；原始图片通过授权附件 URL 显示，Record pending attachment 在服务端持久暂存，确认时归属 Error。
+- 迁移后的限制：Record 仍以文本字段加初始附件为核心 contract，不伪造字段级图片语义；图片可单独完成 Record，字段级 attachment refs 留待后续 Core 变更。
+- 设计见 [assistant-ui workspace spike](design/decisions/2026-09-14-assistant-ui-spike.md)、[正式迁移](design/decisions/2026-09-14-assistant-ui-migration.md) 和 [直接多模态 Web 输入](design/decisions/2026-09-11-direct-multimodal-web-input.md)。
+
 ## 2026-09-09：本机 thin WebUI
+
+> 历史记录：后续已由 2026-09-14 React + assistant-ui 正式迁移取代；本节保留当时的 Flask/Jinja/vanilla adapter 验证事实。
 
 - 新增可选 `web` extra：Flask/Jinja、Waitress 单进程线程服务、vanilla fetch；`python -m errgrind.web` 默认监听 `127.0.0.1:8765`。
 - Error list/detail、三个字段文字与上传 OCR 校对、Grill start/answer/pause/resume、Teach start/reply/finish、Drill spec/draft/Judge 与错误派生跳转均通过 application。新增 `record_error` 校验、来源与 public 返回，CLI 复用。

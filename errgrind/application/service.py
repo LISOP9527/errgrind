@@ -1,5 +1,6 @@
 """The small application facade used by every frontend."""
 
+import hashlib
 from collections.abc import Callable
 from collections.abc import Mapping
 from typing import Optional
@@ -22,7 +23,7 @@ from .contracts import (
 )
 from ..models.types import DrillAttemptView
 from ..models.titles import display_title_for_question
-from ..llm.messages import MultimodalMessage
+from ..llm.messages import ImagePart, MultimodalMessage
 from .attachments import attachment_tuples, image_parts_from_paths
 from .drill import DrillWorkflow
 from .grill import GrillWorkflow
@@ -180,27 +181,46 @@ class ErrGrindApplication:
         image_paths: Optional[list[str]] = None,
         *,
         current_draft: Optional[Mapping[str, str] | RecordDraft] = None,
+        pending_key: Optional[str] = None,
     ) -> RecordDraft:
         """Organize supplied record material into a draft for human review.
 
         Each call is an adjustment to the current editable draft.  Empty
-        semantic fields are valid here: only ``record_error`` enforces the
-        question requirement at the final persistence boundary.
+        semantic fields are valid here: ``record_error`` enforces that the
+        final record contains a question or at least one original image.
         """
         if not isinstance(raw_input, str):
             raise OutputContractError("录入内容必须是文字")
         current = self._normalize_record_draft(current_draft)
         image_paths = list(image_paths or [])
-        if not raw_input.strip() and not image_paths and not any(current.values()):
-            raise OutputContractError("请先输入内容或添加图片")
         try:
-            images = image_parts_from_paths(image_paths)
+            direct_images = image_parts_from_paths(image_paths)
         except Exception as exc:
             from ..llm.ocr import OcrError
 
             if isinstance(exc, OcrError):
                 raise OutputContractError(str(exc)) from exc
             raise WorkflowModelError("读取图片失败，请重试") from exc
+        try:
+            pending_images = tuple(
+                ImagePart(item.mime_type, item.data)
+                for item in (
+                    self.db.list_pending_attachments(pending_key)
+                    if pending_key else ()
+                )
+            )
+        except Exception as exc:
+            raise WorkflowPersistenceError("读取暂存图片失败，请重试") from exc
+        images = []
+        seen_image_hashes = set()
+        for image in (*pending_images, *direct_images):
+            digest = hashlib.sha256(image.data).digest()
+            if digest in seen_image_hashes:
+                continue
+            seen_image_hashes.add(digest)
+            images.append(image)
+        if not raw_input.strip() and not images and not any(current.values()):
+            raise OutputContractError("请先输入内容或添加图片")
         source_text = raw_input.strip()
         prompt = self.prompts.load("record_draft.md").format(
             source_text=source_text,
@@ -211,7 +231,7 @@ class ErrGrindApplication:
         try:
             with usage_scope(action="record", stage="draft"):
                 messages = [
-                    MultimodalMessage("user", prompt, images)
+                    MultimodalMessage("user", prompt, tuple(images))
                     if images
                     else {"role": "user", "content": prompt}
                 ]

@@ -28,6 +28,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import {
   answerConversation,
+  ApiError,
   createDrill,
   finalizeRecord,
   finishTeach,
@@ -46,6 +47,7 @@ import {
   type ConfigPayload,
   type Draft,
   type DrillPayload,
+  type ErrorResponse,
   type HistoryItem,
   type Workspace as WorkspaceData,
 } from "./api";
@@ -505,6 +507,12 @@ function ConfigPage() {
       setForm(configForm(result.config));
       setNotice(result.message);
     } catch (error) {
+      if (error instanceof ApiError && error.submitToken) {
+        setBootstrap((current) => current ? {
+          ...current,
+          tokens: { ...current.tokens, config_save: error.submitToken! },
+        } : current);
+      }
       setErrorText(error instanceof Error ? error.message : "配置保存失败。");
     } finally {
       try {
@@ -981,6 +989,12 @@ function Workspace() {
           ...current, tokens: { ...current.tokens, record_reset: result.submit_token },
         } : current);
       } catch (error) {
+        if (error instanceof ApiError && error.submitToken) {
+          setBootstrap((current) => current ? {
+            ...current,
+            tokens: { ...current.tokens, record_reset: error.submitToken! },
+          } : current);
+        }
         setErrorText(error instanceof Error ? error.message : "新建 Error 失败，请重试。");
         return;
       }
@@ -1158,6 +1172,17 @@ function Workspace() {
           );
         }
       } catch (error) {
+        if (error instanceof ApiError && error.submitToken) {
+          const tokenKey = !workspace
+            ? "record_draft"
+            : workspace.composer === "grill"
+              ? "grill_answer"
+              : "teach_answer";
+          setBootstrap((current) => current ? {
+            ...current,
+            tokens: { ...current.tokens, [tokenKey]: error.submitToken! },
+          } : current);
+        }
         setErrorText(
           error instanceof Error
             ? error.message
@@ -1186,10 +1211,12 @@ function Workspace() {
   const runNextStep = async () => {
     if (!bootstrap || !workspace?.next_step || isRunning) return;
     const step = workspace.next_step;
+    let retryTokenKey: keyof Bootstrap["tokens"] | undefined;
     setIsRunning(true);
     setErrorText(null);
     try {
       if (step.code === "start_grill" || step.code === "resume_grill") {
+        retryTokenKey = "grill_start";
         const result = (await startGrill(
           bootstrap,
           bootstrap.tokens.grill_start,
@@ -1209,6 +1236,7 @@ function Workspace() {
         const data = await loadWorkspace(workspace.error.id);
         updateWorkspace(data);
       } else if (step.code === "start_teach") {
+        retryTokenKey = "teach_start";
         const result = await startTeach(
           bootstrap,
           bootstrap.tokens.teach_start,
@@ -1227,6 +1255,7 @@ function Workspace() {
         );
         updateWorkspace(result.workspace);
       } else if (step.code === "finish_teach_and_drill") {
+        retryTokenKey = "teach_finish";
         const result = await finishTeach(
           bootstrap,
           bootstrap.tokens.teach_finish,
@@ -1234,10 +1263,17 @@ function Workspace() {
         );
         navigate(result.next_url);
       } else if (step.code === "start_drill") {
+        retryTokenKey = "drill_new";
         const result = await createDrill(bootstrap);
         navigate(result.next_url);
       }
     } catch (error) {
+      if (retryTokenKey && error instanceof ApiError && error.submitToken) {
+        setBootstrap((current) => current ? {
+          ...current,
+          tokens: { ...current.tokens, [retryTokenKey!]: error.submitToken! },
+        } : current);
+      }
       setErrorText(
         error instanceof Error
           ? error.message
@@ -1252,13 +1288,22 @@ function Workspace() {
     if (!bootstrap || (!draft.question.trim() && recordAttachmentCount === 0) || isRunning) return;
     setIsRunning(true);
     setErrorText(null);
+    let retryTokenKey: keyof Bootstrap["tokens"] = "record_finalize";
+    let finalized: ErrorResponse | null = null;
     try {
-      const finalized = await finalizeRecord(
+      finalized = await finalizeRecord(
         bootstrap,
         bootstrap.tokens.record_finalize,
         draft,
         [],
       );
+      // Finalize is durable. Clear the record draft and move to the saved
+      // Error before any follow-up Grill request can fail.
+      setDraft(EMPTY_DRAFT);
+      setRecordAttachmentCount(0);
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      window.history.replaceState({}, "", `/errors/${finalized.error.id}`);
+      retryTokenKey = "grill_start";
       const result = (await startGrill(
         bootstrap,
         finalized.submit_token,
@@ -1283,11 +1328,36 @@ function Workspace() {
           : loaded,
       );
       if (loaded.workspace) updateWorkspace(loaded.workspace);
-      setDraft(EMPTY_DRAFT);
-      setRecordAttachmentCount(0);
-      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
-      window.history.replaceState({}, "", `/errors/${finalized.error.id}`);
     } catch (error) {
+      const retrySubmitToken =
+        error instanceof ApiError ? error.submitToken : undefined;
+      if (error instanceof ApiError && error.submitToken) {
+        setBootstrap((current) => current ? {
+          ...current,
+          tokens: { ...current.tokens, [retryTokenKey]: error.submitToken! },
+        } : current);
+      }
+      if (finalized) {
+        // The Error already exists even when starting Grill or refreshing its
+        // workspace fails. Recover its public workspace when possible so a
+        // retry starts Grill instead of submitting the record again.
+        try {
+          const loaded = await loadBootstrap(finalized.error.id);
+          setBootstrap((current) => current ? {
+            ...current,
+            ...loaded,
+            tokens: {
+              ...loaded.tokens,
+              ...(retrySubmitToken ? { grill_start: retrySubmitToken } : {}),
+            },
+          } : loaded);
+          setRecordAttachmentCount(loaded.record_pending_attachment_count || 0);
+          if (loaded.workspace) updateWorkspace(loaded.workspace);
+        } catch {
+          // The URL already identifies the durable Error; a later refresh can
+          // recover its workspace if this bootstrap request also failed.
+        }
+      }
       setErrorText(
         error instanceof Error
           ? error.message

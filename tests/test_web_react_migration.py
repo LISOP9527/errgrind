@@ -7,10 +7,10 @@ from pathlib import Path
 from errgrind.application import ErrGrindApplication
 from errgrind.db.ops import Database
 from errgrind.llm.prompts import PromptManager
-from errgrind.web.app import create_app
-from tests.test_web import _FakeLLM
+from tests.test_web import _FakeLLM, create_app
 
 
+@unittest.skipUnless(create_app is not None, "install the web extra")
 class ReactMigrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
