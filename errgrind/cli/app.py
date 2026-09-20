@@ -1,7 +1,6 @@
 import sys
 import webbrowser
 
-import httpx
 from rich.columns import Columns
 from rich.panel import Panel
 
@@ -15,13 +14,12 @@ from ..db.ops import Database
 from ..llm.client import DEEPSEEK_BASE_URL, GO_BASE_URL, LLMClient, LLMError
 from ..llm.codex import CodexClient, CodexError
 from ..llm.gemini import GeminiClient, GeminiError
+from ..llm.catalog import discover_models, ModelCatalogError
 from ..llm.prompts import PromptManager
 from .commands import COMMANDS, COMMAND_DESCRIPTIONS
 from .state import AppState
 from .ui import console, prompt_line, init_completer, sysmsg, errmsg, select_from_list, popup_input
 
-
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 PROVIDERS = {
     "gemini": ("Gemini（谷歌）", GeminiClient, GeminiError),
@@ -36,25 +34,16 @@ _CODEX_MODEL_METADATA = {}
 
 def _fetch_gemini_models(api_key):
     try:
-        resp = httpx.get(f"{GEMINI_BASE}/models?key={api_key}", timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        return [m["name"].replace("models/", "") for m in data.get("models", [])]
-    except Exception:
+        return [m["id"] for m in discover_models("gemini", api_key=api_key)]
+    except ModelCatalogError:
         return []
 
 
-def _fetch_llm_models(base_url, api_key):
+def _fetch_llm_models(base_url, api_key, provider=None):
     try:
-        resp = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return [m["id"] for m in data.get("data", [])]
-    except Exception:
+        provider = provider or ("opencode" if "opencode" in (base_url or "") else "deepseek")
+        return [m["id"] for m in discover_models(provider, api_key=api_key, base_url=base_url)]
+    except ModelCatalogError:
         return []
 
 
@@ -238,12 +227,12 @@ def _select_model(cfg):
         models = _fetch_gemini_models(cfg["api_key"])
         default_model = DEFAULT_GEMINI_MODEL
     elif provider == "deepseek":
-        models = _fetch_llm_models(DEEPSEEK_BASE_URL, cfg["api_key"])
+        models = _fetch_llm_models(DEEPSEEK_BASE_URL, cfg["api_key"], provider="deepseek")
         default_model = "deepseek-chat"
     elif provider == "opencode":
         if "base_url" not in cfg:
             cfg["base_url"] = GO_BASE_URL
-        models = _fetch_llm_models(cfg["base_url"], cfg["api_key"])
+        models = _fetch_llm_models(cfg["base_url"], cfg["api_key"], provider="opencode")
         default_model = "deepseek-v4-flash"
     elif provider == "codex":
         models, discovered_default = _fetch_codex_models()

@@ -14,7 +14,7 @@
 
 ## 决策记录
 
-- [Web Settings 编辑共享配置](decisions/2026-09-14-web-settings.md)：在 WebUI 调整 Provider、模型、Codex effort 与工作流参数，安全保存共享配置。
+- [Web Settings 编辑共享配置](decisions/2026-09-14-web-settings.md)：在 WebUI 动态读取 Provider 模型目录，选择模型和 Codex effort，并自动、安全地保存完整共享配置。
 - [Drill 目标查询与判题结果展示](decisions/2026-09-08-drill-target-query-and-verdict.md)：按需查询历史题目的目标机制，判题后仅展示对错。
 - [Drill 答题图片输入](decisions/2026-09-08-drill-answer-ocr.md)：历史 OCR 方案；Web 路径已由直接多模态附件决策 supersede，CLI 兼容能力可暂留。
 - [决策索引](decisions/README.md)：记录已经做出的设计决策、原因和影响。

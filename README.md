@@ -15,7 +15,7 @@ python3 -m venv .venv
 
 打开 **http://127.0.0.1:8765**。隔离测试可添加 `--db /tmp/errgrind-test.db`。使用现有 ErrGrind 配置、Prompt 与 SQLite 数据库。
 激活 `.venv` 后也可以直接使用 `errgrind web`；或者继续使用 `.venv/bin/python -m errgrind.web`。`--host`、`--port` 和 `--db` 参数保持不变。
-可在 WebUI 的 **Settings** 中调整 Provider、Model、Codex effort、API Key、OpenCode 地址、Drill 上下文条数和 Grill 最大轮数。设置保存后，当前 Web 进程的后续模型请求立即使用新值；若通过 CLI 修改配置，需重启 Web 进程。使用 Codex 时，先运行 `.venv/bin/errgrind`，在首次配置或 CLI 的 `/config` 中选择 Codex，然后按提示完成浏览器或设备码登录；Web Settings 只调整已保存的模型与 effort，不负责 OAuth 登录。
+可在 WebUI 的 **Settings** 中调整 Provider、从当前账号目录选择 Model、设置 Codex effort、API Key、OpenCode 地址、Drill 上下文条数和 Grill 最大轮数；修改后会自动保存并显示状态。模型目录只表示 Provider 对当前凭据列出的模型，不会逐个发起生成验证；目录暂时不可用时会保留当前或默认回退项。自动保存完成后，当前 Web 进程的后续模型请求立即使用新值；若通过 CLI 修改配置，需重启 Web 进程。使用 Codex 时，先运行 `.venv/bin/errgrind`，在首次配置或 CLI 的 `/config` 中选择 Codex，然后按提示完成浏览器或设备码登录；Web Settings 只读取现有 OAuth 模型目录并调整已保存的模型与 effort，不负责 OAuth 登录。
 
 - **一个 workspace**：左侧提供 New error、Drill、最近 Error history 和底部 Settings；Grill、Teach、Judge 等是当前 Error 对话中的活动，不是独立页面。
 - **Error**：打开后在同一个连续对话工作区中查看 Original Error、Grill、本次诊断、Teach 和下一步动作。原题自然出现在开头，顶部可随时重新打开题目和元数据。

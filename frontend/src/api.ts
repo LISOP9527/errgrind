@@ -66,6 +66,14 @@ export type ConfigPayload = {
   opencode_base_url: string;
 };
 
+export type ModelInfo = {
+  id: string;
+  display_name: string;
+  is_default: boolean;
+  supported_reasoning_efforts: string[];
+  default_reasoning_effort: string | null;
+};
+
 export type DrillPayload = {
   key: string;
   question: string | null;
@@ -183,6 +191,14 @@ export function finishTeach(bootstrap: Bootstrap, token: string, errorId: number
 
 export function loadConfig(): Promise<ConfigPayload> {
   return jsonRequest<ConfigPayload>("/api/assistant/config", { method: "GET" });
+}
+
+export function discoverModels(bootstrap: Bootstrap, values: { provider: string; api_key: string; base_url: string }): Promise<{ models: ModelInfo[] }> {
+  return jsonRequest<{ models: ModelInfo[] }>("/api/assistant/models", {
+    method: "POST",
+    headers: { "X-CSRFToken": bootstrap.csrf, "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(values),
+  });
 }
 
 export function saveConfig(bootstrap: Bootstrap, token: string, values: Record<string, string>): Promise<{ message: string; config: ConfigPayload }> {

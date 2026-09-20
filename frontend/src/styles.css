@@ -55,18 +55,32 @@ button, a { cursor: pointer; }
 .static-page { width: min(780px, calc(100% - 32px)); margin: 0 auto; padding: 34px 0 56px; }
 .page-heading { margin: 0 0 28px; }
 .page-heading p { margin: 0; color: #777; font-size: 14px; }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.settings-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: #777; line-height: 1; }
+.settings-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #938c81; flex: 0 0 auto; }
+.settings-status-dot.saved { background: #356246; }
+.settings-status-dot.saving { background: #d69a38; }
+.settings-status-dot.pending { background: #938c81; }
+.settings-status-dot.error { background: #c85b47; }
+.settings-status.saving { color: #aa5d2a; }
+.settings-status.saved { color: #356246; }
+.settings-status.pending { color: #777; }
+.settings-status.error { color: #9b3b2d; }
+.settings-retry-button { margin-left: 4px; padding: 2px 7px; border: 1px solid #efc5bc; border-radius: 6px; background: #fff; color: #9b3b2d; font-size: 12px; }
+.settings-retry-button:hover { background: #fff0ec; }
 .static-error { width: 100%; margin: 0 0 16px; }
-.notice-success { margin: 0 0 16px; padding: 10px 12px; border: 1px solid #cfe5d6; border-radius: 10px; background: #f3fbf5; color: #356246; font-size: 13px; }
 .settings-form { display: grid; gap: 22px; max-width: 680px; }
 .field { display: grid; gap: 8px; }
 .field > label { font-size: 13px; font-weight: 650; }
 .field input:not([type=checkbox]), .field select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #d9d9d9; border-radius: 10px; background: #fff; color: inherit; font: inherit; outline: none; }
 .field input:not([type=checkbox]):focus, .field select:focus, .drill-answer-form textarea:focus { border-color: #a9c9f4; box-shadow: 0 0 0 3px #eaf3ff; }
+.model-select-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.secondary-button { min-height: 42px; padding: 9px 13px; border: 1px solid #d9d9d9; border-radius: 10px; background: #fff; color: #4d4a46; font-weight: 600; white-space: nowrap; }
+.secondary-button:disabled { opacity: .5; cursor: default; }
 .hint { margin: 0; color: #858585; font-size: 12px; line-height: 1.5; }
 .api-key-status { font-size: 12px; }
 .key-status-indicator.is-set { color: #356246; }.key-status-indicator.is-unset { color: #8b6a54; }
 .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 400 !important; }
-.settings-actions { padding-top: 2px; }
 .primary-button { min-height: 38px; padding: 9px 16px; border: 0; border-radius: 10px; background: #252329; color: #fff; font-weight: 650; }
 .primary-button:disabled { opacity: .5; cursor: default; }
 .drill-start-react { min-height: min(430px, calc(100dvh - 180px)); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 18px; }

@@ -34,6 +34,7 @@ import {
   finishTeach,
   loadBootstrap,
   loadConfig,
+  discoverModels,
   loadDrill,
   loadWorkspace,
   prepareDraft,
@@ -45,6 +46,7 @@ import {
   startTeach,
   type Bootstrap,
   type ConfigPayload,
+  type ModelInfo,
   type Draft,
   type DrillPayload,
   type ErrorResponse,
@@ -450,104 +452,529 @@ function configForm(payload: ConfigPayload): ConfigFormState {
   };
 }
 
+type SaveState = "saved" | "pending" | "saving" | "error";
+
+function isPositiveIntegerString(val: string): boolean {
+  const trimmed = val.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return false;
+  const n = Number(trimmed);
+  return Number.isSafeInteger(n) && n >= 1;
+}
+
+function isConfigFormValid(
+  state: ConfigFormState | null,
+  payload: ConfigPayload | null,
+  formElement?: HTMLFormElement | null,
+): boolean {
+  if (!state || !payload) return false;
+  if (!state.provider.trim()) return false;
+  if (!state.model.trim()) return false;
+  if (!isPositiveIntegerString(state.drill_context_n)) return false;
+  if (!isPositiveIntegerString(state.grill_max_turns)) return false;
+  const changedProvider = state.provider !== payload.settings.provider;
+  const changedOpenCodeUrl =
+    state.provider === "opencode" &&
+    state.base_url.replace(/\/+$/, "") !==
+      (payload.settings.base_url || payload.opencode_base_url).replace(/\/+$/, "");
+  if (
+    state.provider !== "codex" &&
+    (changedProvider || changedOpenCodeUrl) &&
+    !state.api_key.trim()
+  ) {
+    return false;
+  }
+  if (formElement && !formElement.checkValidity()) return false;
+  return true;
+}
+
+function isConfigFormEqual(a: ConfigFormState, b: ConfigFormState): boolean {
+  return (
+    a.provider === b.provider &&
+    a.model === b.model &&
+    a.reasoning_effort === b.reasoning_effort &&
+    a.api_key === b.api_key &&
+    a.base_url === b.base_url &&
+    a.drill_context_n === b.drill_context_n &&
+    a.grill_max_turns === b.grill_max_turns &&
+    a.clear_api_key === b.clear_api_key
+  );
+}
+
 function ConfigPage() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const [payload, setPayload] = useState<ConfigPayload | null>(null);
   const [form, setForm] = useState<ConfigFormState | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  const modelRequest = useRef(0);
+  const formRef = useRef<ConfigFormState | null>(null);
+  const bootstrapRef = useRef<Bootstrap | null>(null);
+  const payloadRef = useRef<ConfigPayload | null>(null);
+  const lastSavedRef = useRef<ConfigFormState | null>(null);
+  const formRevisionRef = useRef(0);
+  const secretRevisionRef = useRef(0);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const deferredSaveRef = useRef(false);
+  const debounceTimerRef = useRef<number | null>(null);
+  const formElementRef = useRef<HTMLFormElement | null>(null);
+  const isMountedRef = useRef(true);
+
+  const triggerSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   useEffect(() => {
+    isMountedRef.current = true;
     Promise.all([loadBootstrap(), loadConfig()])
       .then(([boot, config]) => {
+        if (!isMountedRef.current) return;
         setBootstrap(boot);
+        bootstrapRef.current = boot;
         setPayload(config);
-        setForm(configForm(config));
+        payloadRef.current = config;
+        const initial = configForm(config);
+        setForm(initial);
+        formRef.current = initial;
+        lastSavedRef.current = initial;
+        setSaveState("saved");
       })
-      .catch((error: Error) => setErrorText(error.message));
+      .catch((error: Error) => {
+        if (isMountedRef.current) setErrorText(error.message);
+      });
+
+    return () => {
+      isMountedRef.current = false;
+      if (debounceTimerRef.current) {
+        window.clearTimeout(debounceTimerRef.current);
+      }
+    };
   }, []);
 
-  const set = (key: keyof ConfigFormState, value: string | boolean) =>
-    setForm((current) => (current ? { ...current, [key]: value } : current));
+  const triggerSave = useCallback(async () => {
+    if (isSavingRef.current) {
+      pendingSaveRef.current = true;
+      return;
+    }
+    const current = formRef.current;
+    if (!isConfigFormValid(current, payloadRef.current, formElementRef.current)) {
+      return;
+    }
+    if (lastSavedRef.current && current && isConfigFormEqual(current, lastSavedRef.current)) {
+      pendingSaveRef.current = false;
+      if (isMountedRef.current) setSaveState("saved");
+      return;
+    }
+    await performSaveRef.current();
+  }, []);
+
+  const performSave = useCallback(async () => {
+    if (isSavingRef.current) {
+      pendingSaveRef.current = true;
+      return;
+    }
+    const currentBootstrap = bootstrapRef.current;
+    const currentForm = formRef.current;
+    if (!currentBootstrap || !currentForm) return;
+    if (!isConfigFormValid(
+      currentForm,
+      payloadRef.current,
+      formElementRef.current,
+    )) return;
+
+    const snapshot = { ...currentForm };
+    const formRevision = formRevisionRef.current;
+    const secretRevision = secretRevisionRef.current;
+    isSavingRef.current = true;
+    pendingSaveRef.current = false;
+    if (isMountedRef.current) setSaveState("saving");
+
+    const token = currentBootstrap.tokens.config_save;
+    let success = false;
+    let savedConfig: ConfigPayload | null = null;
+
+    try {
+      const result = await saveConfig(currentBootstrap, token, {
+        provider: snapshot.provider,
+        model: snapshot.model,
+        reasoning_effort: snapshot.reasoning_effort,
+        api_key: snapshot.api_key,
+        base_url: snapshot.base_url,
+        drill_context_n: snapshot.drill_context_n,
+        grill_max_turns: snapshot.grill_max_turns,
+        clear_api_key: snapshot.clear_api_key ? "1" : "0",
+      });
+      success = true;
+      savedConfig = result.config;
+      if (isMountedRef.current) setErrorText(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.submitToken) {
+        const nextToken = error.submitToken;
+        if (isMountedRef.current) {
+          setBootstrap((cur) => cur ? { ...cur, tokens: { ...cur.tokens, config_save: nextToken } } : cur);
+        }
+        if (bootstrapRef.current) {
+          bootstrapRef.current = {
+            ...bootstrapRef.current,
+            tokens: { ...bootstrapRef.current.tokens, config_save: nextToken },
+          };
+        }
+      }
+      if (isMountedRef.current) {
+        setErrorText(error instanceof Error ? error.message : "配置保存失败。");
+        setSaveState("error");
+      }
+    } finally {
+      if (success && savedConfig) {
+        if (isMountedRef.current) setPayload(savedConfig);
+        payloadRef.current = savedConfig;
+        const savedForm = configForm(savedConfig);
+        lastSavedRef.current = savedForm;
+
+        const current = formRef.current;
+        if (current) {
+          const next = formRevisionRef.current === formRevision
+            ? savedForm
+            : { ...current };
+          if (
+            formRevisionRef.current !== formRevision &&
+            secretRevisionRef.current === secretRevision
+          ) {
+            next.api_key = "";
+            next.clear_api_key = false;
+          }
+          formRef.current = next;
+          if (isMountedRef.current) setForm(next);
+        }
+
+        try {
+          const fresh = await loadBootstrap();
+          if (isMountedRef.current) setBootstrap(fresh);
+          bootstrapRef.current = fresh;
+        } catch {
+          // Recover on subsequent navigation/retry
+        }
+      } else if (!success) {
+        try {
+          const fresh = await loadBootstrap();
+          if (isMountedRef.current) setBootstrap(fresh);
+          bootstrapRef.current = fresh;
+        } catch {
+          // Recover on subsequent navigation/retry
+        }
+      }
+
+      isSavingRef.current = false;
+
+      const newest = formRef.current;
+      const hasUnsavedChanges =
+        pendingSaveRef.current ||
+        (newest && lastSavedRef.current && !isConfigFormEqual(newest, lastSavedRef.current));
+      const changedSinceSnapshot =
+        newest && !isConfigFormEqual(newest, snapshot);
+
+      if (
+        hasUnsavedChanges &&
+        !deferredSaveRef.current &&
+        (success || changedSinceSnapshot)
+      ) {
+        if (!debounceTimerRef.current) {
+          if (isConfigFormValid(
+            newest,
+            payloadRef.current,
+            formElementRef.current,
+          )) {
+            void triggerSaveRef.current();
+          } else if (isMountedRef.current) {
+            setSaveState("pending");
+          }
+        } else if (isMountedRef.current) {
+          setSaveState("pending");
+        }
+      } else if (hasUnsavedChanges && isMountedRef.current) {
+        setSaveState("pending");
+      } else if (success && isMountedRef.current) {
+        setSaveState("saved");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    triggerSaveRef.current = triggerSave;
+  }, [triggerSave]);
+
+  useEffect(() => {
+    performSaveRef.current = performSave;
+  }, [performSave]);
+
+  const markPending = useCallback(() => {
+    setSaveState("pending");
+    pendingSaveRef.current = true;
+    if (debounceTimerRef.current) {
+      window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleSave = useCallback(() => {
+    markPending();
+    deferredSaveRef.current = false;
+    debounceTimerRef.current = window.setTimeout(() => {
+      debounceTimerRef.current = null;
+      void triggerSaveRef.current();
+    }, 500);
+  }, [markPending]);
+
+  const flushSave = useCallback(() => {
+    if (debounceTimerRef.current) {
+      window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    const current = formRef.current;
+    if (!isConfigFormValid(
+      current,
+      payloadRef.current,
+      formElementRef.current,
+    )) {
+      formElementRef.current?.reportValidity();
+      return;
+    }
+    void triggerSaveRef.current();
+  }, []);
+
+  const initialProvider = payload?.settings.provider;
+  const sameProvider = !!form && form.provider === initialProvider;
+  const loadModels = useCallback(async (snapshot: ConfigFormState) => {
+    if (!bootstrap || !payload) return;
+    const requestId = ++modelRequest.current;
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const result = await discoverModels(bootstrap, {
+        provider: snapshot.provider,
+        api_key: snapshot.api_key,
+        base_url: snapshot.base_url,
+      });
+      if (requestId !== modelRequest.current) return;
+      setModels(result.models);
+      setForm((current) => {
+        if (!current || current.provider !== snapshot.provider) return current;
+        const currentEntry = result.models.find((item) => item.id === current.model);
+        const keepConfigured =
+          current.provider === payload.settings.provider &&
+          current.model === payload.settings.model;
+        const fallback =
+          result.models.find(
+            (item) => item.id === payload.provider_models[current.provider],
+          ) || result.models.find((item) => item.is_default) || result.models[0];
+        const model = currentEntry || keepConfigured
+          ? current.model
+          : fallback?.id || "";
+        const metadata = result.models.find((item) => item.id === model);
+        const efforts = metadata?.supported_reasoning_efforts || [];
+        const reasoning_effort =
+          current.reasoning_effort && metadata &&
+          !efforts.includes(current.reasoning_effort)
+            ? ""
+            : current.reasoning_effort;
+        const next = { ...current, model, reasoning_effort };
+        if (!isConfigFormEqual(current, next)) {
+          formRevisionRef.current += 1;
+        }
+        formRef.current = next;
+        return next;
+      });
+    } catch (error) {
+      if (requestId !== modelRequest.current) return;
+      setModels([]);
+      setModelsError(
+        error instanceof Error ? error.message : "模型目录获取失败，请重试。",
+      );
+    } finally {
+      if (requestId === modelRequest.current) setModelsLoading(false);
+    }
+  }, [bootstrap, payload]);
+
+  const savedOpenCodeEndpointMatches = !!form && !!payload && (
+    form.provider !== "opencode" ||
+    form.base_url.replace(/\/+$/, "") ===
+      (payload.settings.base_url || payload.opencode_base_url).replace(/\/+$/, "")
+  );
+  const hasDiscoveryCredentials = !!form && (
+    form.provider === "codex" ||
+    !!form.api_key.trim() ||
+    (sameProvider && !!payload?.api_key_set && savedOpenCodeEndpointMatches)
+  );
+  useEffect(() => {
+    if (!bootstrap || !payload || !form) return;
+    if (!hasDiscoveryCredentials) {
+      modelRequest.current += 1;
+      setModels([]);
+      setModelsError(null);
+      setModelsLoading(false);
+      return;
+    }
+    const snapshot = form;
+    const changedOpenCodeUrl =
+      snapshot.provider === "opencode" &&
+      snapshot.base_url !== payload.settings.base_url;
+    const timer = window.setTimeout(() => {
+      void loadModels(snapshot);
+    }, snapshot.api_key || changedOpenCodeUrl ? 500 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      modelRequest.current += 1;
+    };
+  }, [
+    bootstrap,
+    payload,
+    form?.provider,
+    form?.api_key,
+    form?.base_url,
+    hasDiscoveryCredentials,
+    loadModels,
+  ]);
+
+  const set = (
+    key: keyof ConfigFormState,
+    value: string | boolean,
+    saveAfterDebounce = true,
+  ) => {
+    formRevisionRef.current += 1;
+    if (key === "api_key" || key === "clear_api_key") {
+      secretRevisionRef.current += 1;
+    }
+    setForm((current) => {
+      if (!current) return current;
+      const next = { ...current, [key]: value };
+      formRef.current = next;
+      return next;
+    });
+    if (saveAfterDebounce) {
+      scheduleSave();
+    } else {
+      markPending();
+      deferredSaveRef.current = true;
+    }
+  };
+
   const changeProvider = (provider: string) => {
-    if (!payload || !form) return;
-    setForm({
-      ...form,
+    if (!payload || !formRef.current) return;
+    formRevisionRef.current += 1;
+    secretRevisionRef.current += 1;
+    setModels([]);
+    setModelsError(null);
+    const next: ConfigFormState = {
+      ...formRef.current,
       provider,
-      model: payload.provider_models[provider] || "",
-      reasoning_effort: provider === "codex" ? form.reasoning_effort : "",
+      model: provider === payload.settings.provider
+        ? payload.settings.model
+        : payload.provider_models[provider] || "",
+      reasoning_effort: provider === "codex"
+        ? (provider === payload.settings.provider
+          ? payload.settings.reasoning_effort || ""
+          : formRef.current.reasoning_effort)
+        : "",
       api_key: "",
       clear_api_key: false,
       base_url:
         provider === "opencode"
-          ? form.base_url || payload.opencode_base_url
+          ? (provider === payload.settings.provider
+            ? payload.settings.base_url || payload.opencode_base_url
+            : payload.opencode_base_url)
           : "",
-    });
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!bootstrap || !form || saving) return;
-    setSaving(true);
-    setErrorText(null);
-    setNotice(null);
-    try {
-      const result = await saveConfig(bootstrap, bootstrap.tokens.config_save, {
-        provider: form.provider,
-        model: form.model,
-        reasoning_effort: form.reasoning_effort,
-        api_key: form.api_key,
-        base_url: form.base_url,
-        drill_context_n: form.drill_context_n,
-        grill_max_turns: form.grill_max_turns,
-        clear_api_key: form.clear_api_key ? "1" : "0",
-      });
-      setPayload(result.config);
-      setForm(configForm(result.config));
-      setNotice(result.message);
-    } catch (error) {
-      if (error instanceof ApiError && error.submitToken) {
-        setBootstrap((current) => current ? {
-          ...current,
-          tokens: { ...current.tokens, config_save: error.submitToken! },
-        } : current);
-      }
-      setErrorText(error instanceof Error ? error.message : "配置保存失败。");
-    } finally {
-      try {
-        setBootstrap(await loadBootstrap());
-      } catch {
-        // The next navigation/reload can recover bootstrap state.
-      }
-      setSaving(false);
+    };
+    formRef.current = next;
+    setForm(next);
+    if (provider === "codex") {
+      scheduleSave();
+    } else {
+      markPending();
+      deferredSaveRef.current = true;
     }
   };
 
-  const initialProvider = payload?.settings.provider;
   const providerLabel: Record<string, string> = { gemini: "Gemini", deepseek: "DeepSeek", opencode: "OpenCode", codex: "Codex" };
   const isCodex = form?.provider === "codex";
   const isOpenCode = form?.provider === "opencode";
-  const sameProvider = !!form && form.provider === initialProvider;
+  const selectedModel = models.find((item) => item.id === form?.model);
+  const effortOptions = selectedModel
+    ? selectedModel.supported_reasoning_efforts
+    : (form?.reasoning_effort ? [form.reasoning_effort] : []);
+  const changeModel = (model: string) => {
+    const metadata = models.find((item) => item.id === model);
+    formRevisionRef.current += 1;
+    setForm((current) => {
+      if (!current) return current;
+      const efforts = metadata?.supported_reasoning_efforts || [];
+      const reasoning_effort =
+        current.reasoning_effort && metadata &&
+        !efforts.includes(current.reasoning_effort)
+          ? ""
+          : current.reasoning_effort;
+      const next = { ...current, model, reasoning_effort };
+      formRef.current = next;
+      return next;
+    });
+    scheduleSave();
+  };
+
+  const statusLabel = useMemo(() => {
+    switch (saveState) {
+      case "saving":
+        return "保存中…";
+      case "pending":
+        return "待保存…";
+      case "saved":
+        return "已保存";
+      case "error":
+        return "保存失败";
+    }
+  }, [saveState]);
+
   return (
     <StaticShell title="Settings" bootstrap={bootstrap}>
-      <div className="page-heading">
+      <div className="page-heading settings-heading">
         <p>调整模型服务、提供商及运行参数。</p>
+        {form && payload && (
+          <div
+            className={`settings-status ${saveState}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className={`settings-status-dot ${saveState}`} aria-hidden="true" />
+            <span>{statusLabel}</span>
+            {saveState === "error" && (
+              <button
+                type="button"
+                className="settings-retry-button"
+                onClick={() => void flushSave()}
+              >
+                重试
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {errorText && (
         <div className="error-banner static-error" role="alert">
           {errorText}
         </div>
       )}
-      {notice && (
-        <div className="notice-success" role="status">
-          {notice}
-        </div>
-      )}
       {!form || !payload ? (
         <p className="muted">加载中…</p>
       ) : (
-        <form className="settings-form" onSubmit={submit}>
+        <form
+          ref={formElementRef}
+          className="settings-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void flushSave();
+          }}
+        >
           <div className="field">
             <label htmlFor="config-provider">提供商 (Provider)</label>
             <select
@@ -564,15 +991,40 @@ function ConfigPage() {
           </div>
           <div className="field">
             <label htmlFor="config-model">模型 (Model)</label>
-            <input
-              id="config-model"
-              value={form.model}
-              onChange={(e) => set("model", e.target.value)}
-              placeholder={payload.provider_models[form.provider] || ""}
-              required
-            />
+            <div className="model-select-row">
+              <select
+                id="config-model"
+                value={form.model}
+                onChange={(e) => changeModel(e.target.value)}
+                required
+              >
+                {form.model && !models.some((item) => item.id === form.model) && (
+                  <option value={form.model}>
+                    {sameProvider && form.model === payload.settings.model
+                      ? "当前配置（目录未返回）"
+                      : "默认回退（目录未验证）"}: {form.model}
+                  </option>
+                )}
+                {!form.model && <option value="">{modelsLoading ? "检测模型中…" : "请选择模型"}</option>}
+                {models.map((model) => <option key={model.id} value={model.id}>
+                  {model.display_name && model.display_name !== model.id
+                    ? `${model.display_name} (${model.id})`
+                    : model.id}
+                </option>)}
+              </select>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={modelsLoading || !hasDiscoveryCredentials}
+                onClick={() => void loadModels(form)}
+              >
+                重新检测
+              </button>
+            </div>
             <p className="hint">
-              指定调用的模型名称。切换提供商时会自动填入该提供商的默认模型。
+              {modelsError || (!hasDiscoveryCredentials
+                ? "输入 API Key 后将自动检测当前账号的模型目录。"
+                : "目录由提供商返回，仅表示账号可见，不代表逐模型生成验证。")}
             </p>
           </div>
           {isCodex && (
@@ -586,12 +1038,7 @@ function ConfigPage() {
                 onChange={(e) => set("reasoning_effort", e.target.value)}
               >
                 <option value="">默认 (Default)</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-                <option value="max">max</option>
-                <option value="ultra">ultra</option>
+                {effortOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
               </select>
               <p className="hint">
                 仅适用于 Codex 提供商，用于控制思考与推理深度。
@@ -606,7 +1053,8 @@ function ConfigPage() {
                 type="password"
                 autoComplete="new-password"
                 value={form.api_key}
-                onChange={(e) => set("api_key", e.target.value)}
+                onChange={(e) => set("api_key", e.target.value, false)}
+                onBlur={scheduleSave}
                 placeholder={
                   sameProvider && payload.api_key_set
                     ? "已配置 API Key（留空保持不变）"
@@ -657,7 +1105,8 @@ function ConfigPage() {
               <input
                 id="config-base-url"
                 value={form.base_url}
-                onChange={(e) => set("base_url", e.target.value)}
+                onChange={(e) => set("base_url", e.target.value, false)}
+                onBlur={scheduleSave}
                 placeholder={payload.opencode_base_url}
                 autoComplete="off"
               />
@@ -701,11 +1150,6 @@ function ConfigPage() {
             <p className="hint">
               单次 Grill 诊断对话的最大交互轮数上限（至少为 1，默认 30）。
             </p>
-          </div>
-          <div className="settings-actions">
-            <button className="primary-button" type="submit" disabled={saving}>
-              {saving ? "保存中…" : "保存设置"}
-            </button>
           </div>
         </form>
       )}

@@ -105,6 +105,35 @@ class WebSettingsTests(unittest.TestCase):
         self.assertEqual(saved['base_url'], 'https://example.com/v1')
         self.assertIsNone(saved['reasoning_effort'])
 
+    def test_changing_saved_opencode_address_requires_reentering_key(self):
+        self.web = create_app(
+            db_path=str(Path(self.temp.name) / 'opencode.db'),
+            cfg={'provider': 'opencode', 'model': 'deepseek-v4-flash',
+                 'reasoning_effort': None, 'api_key': 'saved-go-secret',
+                 'base_url': 'https://old.example/v1',
+                 'drill_context_n': 10, 'grill_max_turns': 30},
+            llm=_FakeLLM(), secret_key='opencode-settings-test',
+        )
+        self.web.testing = True
+        self.client = self.web.test_client()
+        _, data = self.form(
+            provider='opencode', model='deepseek-v4-flash',
+            base_url='https://new.example/v1', api_key='',
+        )
+        rejected = self.client.post('/config', data=data)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertNotIn(b'saved-go-secret', rejected.data)
+        self.assertFalse(self.config_path.exists())
+
+        _, data = self.form(
+            provider='opencode', model='deepseek-v4-flash',
+            base_url='https://new.example/v1', api_key='replacement-secret',
+        )
+        self.assertEqual(self.client.post('/config', data=data).status_code, 303)
+        saved = json.loads(self.config_path.read_text())
+        self.assertEqual(saved['base_url'], 'https://new.example/v1')
+        self.assertEqual(saved['api_key'], 'replacement-secret')
+
     def test_invalid_values_do_not_write_config(self):
         for changes in (
             {'drill_context_n': '0'}, {'grill_max_turns': 'abc'},

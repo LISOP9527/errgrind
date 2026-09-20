@@ -28,6 +28,7 @@ from ..config import (
 )
 from ..db.ops import Database
 from ..llm.client import GO_BASE_URL
+from ..llm.catalog import ModelCatalogError, discover_models
 from ..llm.ocr import MAX_IMAGE_BYTES, OcrError, load_image
 from ..llm.prompts import PromptManager
 from markupsafe import Markup
@@ -675,6 +676,53 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
     def assistant_config():
         return jsonify(config_payload())
 
+    @app.post('/api/assistant/models')
+    def assistant_models():
+        """Discover provider models without persisting the submitted key."""
+        values = request.get_json(silent=True) or request.form
+        if not hasattr(values, 'get'):
+            return jsonify(error='模型目录请求格式无效。'), 400
+
+        def text_field(name):
+            value = values.get(name, '')
+            return value.strip() if isinstance(value, str) else ''
+
+        provider = text_field('provider')
+        submitted_key = text_field('api_key')
+        base_url = text_field('base_url')
+        if provider not in PROVIDER_MODELS:
+            return jsonify(error='请选择有效的 AI 提供商。'), 400
+        if len(submitted_key) > 4096 or len(base_url) > 2048:
+            return jsonify(error='API Key 或 API 地址过长。'), 400
+        using_saved_key = False
+        if provider == 'codex':
+            submitted_key, base_url = '', ''
+        elif not submitted_key and provider == cfg.get('provider'):
+            submitted_key = cfg.get('api_key', '')
+            using_saved_key = bool(submitted_key)
+        if provider == 'deepseek':
+            base_url = ''
+        elif provider == 'opencode':
+            saved_base_url = (cfg.get('base_url') or GO_BASE_URL).strip().rstrip('/')
+            requested_base_url = (base_url or (
+                saved_base_url if provider == cfg.get('provider') else GO_BASE_URL
+            )).strip().rstrip('/')
+            if using_saved_key and requested_base_url != saved_base_url:
+                return jsonify(
+                    error='修改 OpenCode API 地址时，请重新输入 API Key。'
+                ), 400
+            base_url = requested_base_url
+        if provider != 'codex' and not submitted_key:
+            return jsonify(error='切换提供商后，请先输入新的 API Key。'), 400
+        try:
+            models = discover_models(provider, api_key=submitted_key, base_url=base_url)
+        except ModelCatalogError as error:
+            app.logger.warning('model catalog discovery failed for provider %s', provider)
+            return jsonify(error=str(error)), 502
+        if not models:
+            return jsonify(error='当前账号的模型目录没有返回可用模型。'), 502
+        return jsonify(provider=provider, models=models)
+
     def render_config(*, values=None, form_error=None, status=200):
         payload = config_payload(values=values, form_error=form_error)
         return render_template('config.html', **payload), status
@@ -745,6 +793,13 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
                         valid_url = False
                     if not valid_url:
                         return invalid('请输入有效的 OpenCode API 地址（http 或 https）。')
+                    old_base_url = (cfg.get('base_url') or GO_BASE_URL).strip().rstrip('/')
+                    if (
+                        not changed_provider
+                        and base_url.strip().rstrip('/') != old_base_url
+                        and not key
+                    ):
+                        return invalid('修改 OpenCode API 地址时，请重新输入 API Key。')
                     candidate['base_url'] = base_url
                 else:
                     candidate.pop('base_url', None)

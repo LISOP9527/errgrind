@@ -24,8 +24,10 @@
 
     <div class="field" data-config-row="model">
       <label for="config-model">模型 (Model)</label>
-      <input id="config-model" type="text" name="model" value="{{ settings.model }}" placeholder="{{ provider_models.get(settings.provider, '') }}" required>
-      <p class="hint">指定调用的模型名称。切换提供商时会自动填入该提供商的默认模型。</p>
+      <select id="config-model" name="model" required>
+        <option value="{{ settings.model }}" selected>{{ settings.model }}（当前配置）</option>
+      </select>
+      <p class="hint">启用 JavaScript 后会自动读取当前提供商的模型目录；此兼容表单保留当前配置。</p>
     </div>
 
     <div class="field" data-config-row="reasoning_effort">
