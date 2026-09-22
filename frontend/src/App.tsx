@@ -1162,6 +1162,7 @@ type DrillFile = { file: File; url: string };
 function DrillPage({ drillKey }: { drillKey: string }) {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const [drill, setDrill] = useState<DrillPayload | null>(null);
+  const [selectedTargetId, setSelectedTargetId] = useState("");
   const [answer, setAnswer] = useState("");
   const [files, setFiles] = useState<DrillFile[]>([]);
   const filesRef = useRef<DrillFile[]>([]);
@@ -1172,6 +1173,7 @@ function DrillPage({ drillKey }: { drillKey: string }) {
     const data = await loadDrill(drillKey);
     setDrill(data);
     setAnswer(data.answer || "");
+    setSelectedTargetId(data.target_error ? String(data.target_error.id) : "");
   }, [drillKey]);
   useEffect(() => {
     Promise.all([loadBootstrap(), loadDrill(drillKey)])
@@ -1179,6 +1181,7 @@ function DrillPage({ drillKey }: { drillKey: string }) {
         setBootstrap(boot);
         setDrill(data);
         setAnswer(data.answer || "");
+        setSelectedTargetId(data.target_error ? String(data.target_error.id) : "");
       })
       .catch((error: Error) => setErrorText(error.message));
   }, [drillKey]);
@@ -1197,7 +1200,7 @@ function DrillPage({ drillKey }: { drillKey: string }) {
     setIsRunning(true);
     setErrorText(null);
     try {
-      await prepareDrill(drill);
+      await prepareDrill(drill, selectedTargetId ? Number(selectedTargetId) : null);
       await refresh();
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "生成练习失败。");
@@ -1247,6 +1250,10 @@ function DrillPage({ drillKey }: { drillKey: string }) {
       }),
     );
 
+  const selectedTarget = drill?.target_options.find(
+    (target) => String(target.id) === selectedTargetId,
+  ) || null;
+
   return (
     <StaticShell title="Drill" bootstrap={bootstrap}>
       {errorText && (
@@ -1259,7 +1266,13 @@ function DrillPage({ drillKey }: { drillKey: string }) {
       ) : !drill.question ? (
         <div className="drill-start-react" aria-live="polite">
           {drill.state === "preparing" || isRunning ? (
-            <p className="drill-lead">正在根据历史 Error 生成练习…</p>
+            <p className="drill-lead">
+              {drill.target_error
+                ? `正在为“${drill.target_error.title}”生成练习…`
+                : selectedTarget
+                  ? `正在为“${selectedTarget.title}”生成练习…`
+                : "正在根据历史 Error 生成练习…"}
+            </p>
           ) : drill.state === "failed" ? (
             <>
               <p className="drill-lead">生成练习失败。</p>
@@ -1274,11 +1287,34 @@ function DrillPage({ drillKey }: { drillKey: string }) {
           ) : (
             <>
               <div className="drill-intro">
-                <p className="drill-lead">根据历史 Error 生成一题新的练习。</p>
+                <p className="drill-lead">
+                  {drill.target_error
+                    ? `为“${drill.target_error.title}”生成一题新的练习。`
+                    : selectedTarget
+                      ? `为“${selectedTarget.title}”生成一题新的练习。`
+                    : "根据历史 Error 生成一题新的练习。"}
+                </p>
                 <p className="drill-description">
-                  开始后会从已完成诊断的 Error 中选择一个目标并生成题目。
+                  {drill.target_error || selectedTarget
+                    ? "这道练习只使用当前 Error 的诊断作为出题目标。"
+                    : "开始后会从已完成诊断的 Error 中选择一个目标并生成题目。"}
                 </p>
               </div>
+              <label className="drill-target-field">
+                <span>练习目标</span>
+                <select
+                  value={selectedTargetId}
+                  onChange={(event) => setSelectedTargetId(event.target.value)}
+                  disabled={isRunning}
+                >
+                  <option value="">综合历史 Error</option>
+                  {drill.target_options.map((target) => (
+                    <option value={target.id} key={target.id}>
+                      {target.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 className="primary-button"
                 onClick={start}
@@ -1292,7 +1328,11 @@ function DrillPage({ drillKey }: { drillKey: string }) {
       ) : (
         <div className="drill-active-react">
           <div className="drill-question-react">
-            <p className="drill-context">根据历史 Error 生成</p>
+            <p className="drill-context">
+              {drill.target_error
+                ? `针对“${drill.target_error.title}”生成`
+                : "根据历史 Error 生成"}
+            </p>
             <StaticMarkdown text={drill.question} />
           </div>
           {drill.pending_attachment_count > 0 && (
@@ -1310,13 +1350,16 @@ function DrillPage({ drillKey }: { drillKey: string }) {
                 <>
                   <p>这次练习完成了。</p>
                   <div className="inline-actions">
-                    <a href="/drill" onClick={(event) => {
-                      event.preventDefault();
-                      if (!bootstrap) return;
-                      createDrill(bootstrap)
-                        .then((result) => navigate(result.next_url))
-                        .catch((error) => setErrorText(error instanceof Error ? error.message : "进入 Drill 失败。"));
-                    }}>
+                    <a
+                      href={drill.target_error ? `/errors/${drill.target_error.id}/drill` : "/drill"}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        if (!bootstrap) return;
+                        createDrill(bootstrap, drill.target_error?.id)
+                          .then((result) => navigate(result.next_url))
+                          .catch((error) => setErrorText(error instanceof Error ? error.message : "进入 Drill 失败。"));
+                      }}
+                    >
                       再做一道 <span aria-hidden="true">→</span>
                     </a>
                     <a className="muted-link" href="/" onClick={(event) => { event.preventDefault(); navigate("/"); }}>
@@ -1708,7 +1751,7 @@ function Workspace() {
         navigate(result.next_url);
       } else if (step.code === "start_drill") {
         retryTokenKey = "drill_new";
-        const result = await createDrill(bootstrap);
+        const result = await createDrill(bootstrap, workspace.error.id);
         navigate(result.next_url);
       }
     } catch (error) {

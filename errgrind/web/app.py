@@ -98,7 +98,7 @@ def _next_action_view(code: str, error_id: int, *, teach_active: bool):
         return {
             "code": "finish_teach_and_drill",
             "label": "Drill",
-            "description": "继续追问，或进入一道根据历史 Error 生成的练习。",
+            "description": "继续追问，或针对当前 Error 做一道新练习。",
             "method": "post",
             "href": url_for("teach_to_drill", error_id=error_id),
         }
@@ -113,9 +113,9 @@ def _next_action_view(code: str, error_id: int, *, teach_active: bool):
     return {
         "code": "start_drill",
         "label": "Drill",
-        "description": "用一道根据历史 Error 生成的新题继续练习。",
+        "description": "针对当前 Error 做一道新练习。",
         "method": "get",
-        "href": url_for("drill_new"),
+        "href": url_for("drill_for_error", error_id=error_id),
     }
 
 
@@ -1036,7 +1036,8 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
     def assistant_teach_finish(api):
         error_id = request_int('error_id')
         api.finish_teach(error_id)
-        return jsonify(next_url=url_for('drill_new'))
+        key = create_drill_session(error_id=error_id)
+        return jsonify(next_url=url_for('drill_detail', key=key))
 
     @app.get('/errors/<int:error_id>')
     def error_detail(error_id):
@@ -1143,7 +1144,8 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
     def teach_to_drill(api, error_id):
         """Finish an active Teach explicitly before entering Drill."""
         api.finish_teach(error_id)
-        return success(url_for('drill_new'))
+        key = create_drill_session(error_id=error_id)
+        return success(url_for('drill_detail', key=key))
 
     @app.post('/errors/<int:error_id>/delete')
     @mutation
@@ -1158,10 +1160,13 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
         flash('Error 已删除。')
         return success(url_for('index'))
 
-    def create_drill_session():
+    def create_drill_session(*, error_id=None):
         key = secrets.token_urlsafe(24)
         with state_lock:
-            drills[key] = dict(owner=session['sid'], stage='ready', preparation=None, judgment=None, answer='')
+            drills[key] = dict(
+                owner=session['sid'], stage='ready', preparation=None,
+                judgment=None, answer='', error_id=error_id,
+            )
             while len(drills) > 32:
                 removable = next((k for k, v in drills.items() if v['stage'] not in {'spec', 'draft', 'judge'}), None)
                 if removable is None:
@@ -1171,14 +1176,43 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
                     api.delete_pending_attachments(removable)
         return key
 
+    def drill_target_views(api):
+        return [
+            {'id': error.id, 'title': _display_title(error)}
+            for error in api.list_drill_targets()
+        ]
+
     @app.get('/drill')
     def drill_new():
         return redirect(url_for('drill_detail', key=create_drill_session()), code=303)
 
+    @app.get('/errors/<int:error_id>/drill')
+    def drill_for_error(error_id):
+        with boundary() as api:
+            if api.get_error(error_id) is None:
+                raise ErrorNotFound()
+            if error_id not in {item.id for item in api.list_drill_targets()}:
+                raise NoDrillContext()
+        key = create_drill_session(error_id=error_id)
+        return redirect(url_for('drill_detail', key=key), code=303)
+
     @app.post('/api/assistant/drill/new')
     @mutation
     def assistant_drill_new(api):
-        key = create_drill_session()
+        raw_error_id = request_value('error_id', '')
+        error_id = None
+        if str(raw_error_id).strip():
+            try:
+                error_id = int(raw_error_id)
+            except (TypeError, ValueError):
+                abort(400)
+            if error_id <= 0:
+                abort(400)
+            if api.get_error(error_id) is None:
+                raise ErrorNotFound()
+            if error_id not in {item.id for item in api.list_drill_targets()}:
+                raise NoDrillContext()
+        key = create_drill_session(error_id=error_id)
         return jsonify(next_url=url_for('drill_detail', key=key))
 
     def drill_payload(key, *, include_tokens=False):
@@ -1186,6 +1220,10 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
         prep, result = item['preparation'], item['judgment']
         with boundary() as api:
             pending_attachment_count = api.get_pending_attachment_count(key)
+            target = api.get_error(item['error_id']) if item['error_id'] is not None else None
+            target_options = drill_target_views(api)
+        if item['error_id'] is not None and target is None:
+            raise ErrorNotFound()
         public_result = None
         if result is not None:
             public_result = {
@@ -1199,6 +1237,13 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
             'answer': item['answer'],
             'pending_attachment_count': pending_attachment_count,
             'state': _drill_state(item['stage']),
+            'target_error': (
+                None if target is None else {
+                    'id': target.id,
+                    'title': _display_title(target),
+                }
+            ),
+            'target_options': target_options,
         }
         if include_tokens:
             payload.update(
@@ -1233,11 +1278,31 @@ def create_app(*, db_path=None, cfg=None, llm=None, application_factory=None,
         item = get_drill(key)
         if item['preparation'] is not None:
             return success(url_for('drill_detail', key=key))
+        raw_error_id = request_value('error_id', None)
+        if raw_error_id is not None:
+            if str(raw_error_id).strip():
+                try:
+                    selected_error_id = int(raw_error_id)
+                except (TypeError, ValueError):
+                    abort(400)
+                if selected_error_id <= 0:
+                    abort(400)
+                if api.get_error(selected_error_id) is None:
+                    raise ErrorNotFound()
+                if selected_error_id not in {
+                    target.id for target in api.list_drill_targets()
+                }:
+                    raise NoDrillContext()
+                item['error_id'] = selected_error_id
+            else:
+                item['error_id'] = None
         def on_stage(stage):
             with state_lock:
                 item['stage'] = stage.value
         try:
-            item['preparation'] = api.prepare_drill(on_stage=on_stage)
+            item['preparation'] = api.prepare_drill(
+                error_id=item['error_id'], on_stage=on_stage,
+            )
             item['stage'] = 'prepared'
         except Exception:
             item['stage'] = 'failed'

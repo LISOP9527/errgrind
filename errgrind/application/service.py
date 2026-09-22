@@ -61,6 +61,19 @@ class ErrGrindApplication:
             for error in self.db.list_all_errors()
         ]
 
+    def list_drill_targets(self):
+        """Return public Errors that can be used as one explicit Drill target."""
+        errors = self.db.list_all_errors()
+        if not errors:
+            return []
+        by_id = {error.id: error for error in errors}
+        contexts = self.db.get_drill_context(len(errors))
+        return [
+            public_error(by_id[item.error_id])
+            for item in contexts
+            if item.error_id in by_id
+        ]
+
     def get_next_step(self, error_id: int) -> NextStep:
         """Return a small, stable recommendation for an Error workspace."""
         error = self.db.get_error(error_id)
@@ -346,10 +359,13 @@ class ErrGrindApplication:
         return TeachWorkflow(self.db, self.llm, self.prompts).finish(error_id)
 
     def prepare_drill(
-        self, *, on_stage: Optional[Callable[[DrillStage], None]] = None
+        self,
+        *,
+        error_id: int | None = None,
+        on_stage: Optional[Callable[[DrillStage], None]] = None,
     ) -> DrillPreparation:
         return DrillWorkflow(self.db, self.llm, self.prompts, self.cfg).prepare(
-            on_stage=on_stage
+            error_id=error_id, on_stage=on_stage
         )
 
     def judge_and_record_drill(

@@ -703,6 +703,28 @@ class DrillWorkflowTests(unittest.TestCase):
             _cmd_drills(state, "999")
         message.assert_called_once_with("未找到 Drill 记录 #999")
 
+    def test_drill_command_passes_requested_error_id(self):
+        calls = []
+
+        class DrillApp:
+            def prepare_drill(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(question="指定来源的新题")
+
+            def judge_and_record_drill(self, preparation, answer):
+                return SimpleNamespace(is_correct=True)
+
+        state = AppState(db=self.db, llm=object(), prompts=PromptManager())
+        state.application = lambda: DrillApp()
+        with (
+            patch("errgrind.cli.commands.popup_drill_answer", return_value="作答"),
+            patch("errgrind.cli.commands.popup_content"),
+            patch("errgrind.cli.commands.sysmsg"),
+        ):
+            _cmd_drill(state, str(self.source_error_id))
+
+        self.assertEqual(calls[0]["error_id"], self.source_error_id)
+
     def test_drill_judgment_result_only_shows_exact_verdict(self):
         state = AppState(db=self.db, llm=object(), prompts=PromptManager())
         for is_correct, expected in ((True, "正确"), (False, "错误")):

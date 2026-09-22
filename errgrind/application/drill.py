@@ -249,15 +249,24 @@ class DrillWorkflow:
 
     @usage_action("drill", "prepare")
     def prepare(
-        self, *, on_stage: Callable[[DrillStage], None] | None = None
+        self,
+        *,
+        error_id: int | None = None,
+        on_stage: Callable[[DrillStage], None] | None = None,
     ) -> DrillPreparation:
         if on_stage is not None:
             on_stage(DrillStage.SPEC)
-        context = self.db.get_drill_context(self.cfg.get("drill_context_n", 10))
+        context = self.db.get_drill_context(
+            self.cfg.get("drill_context_n", 10), error_id=error_id
+        )
         if not context:
+            if error_id is None:
+                raise NoDrillContext(
+                    "暂无可用于出题的 error，请先通过 /resume "
+                    "完成至少一条 error 的 grilling"
+                )
             raise NoDrillContext(
-                "暂无可用于出题的 error，请先通过 /resume "
-                "完成至少一条 error 的 grilling"
+                f"Error #{error_id} 暂不可用于 Drill，请确认它已完成 Grill"
             )
         error_context = "\n\n".join(
             f"[Error {index + 1}]\n[原题]\n{item.question}\n[Grill 摘要]\n{item.grilling_summary}"

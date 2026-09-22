@@ -131,10 +131,78 @@ class ReactMigrationTests(unittest.TestCase):
         payload = self.client.get(f"/api/assistant/drill/{key}").get_json()
         self.assertEqual(payload["state"], "idle")
         self.assertIsNone(payload["question"])
+        self.assertIsNone(payload["target_error"])
+        self.assertEqual(payload["target_options"], [])
         self.assertIn("prepare", payload["tokens"])
         self.assertIn("judge", payload["tokens"])
         self.assertEqual(self.llm.chat_json_calls, before_json)
         self.assertEqual(self.llm.chat_calls, before_chat)
+
+    def test_targeted_drill_session_uses_only_requested_error(self):
+        target_id = self.db.create_error("目标题：只应看到甲", "我直接套公式")
+        other_id = self.db.create_error("干扰题：不应看到乙", "我漏看条件")
+        self.db.update_grilling(target_id, "[]", "目标机制：没有核对条件")
+        self.db.update_grilling(other_id, "[]", "干扰机制：计算失误")
+
+        csrf, tokens = self.bootstrap()
+        created = self.post_json_token(
+            "/api/assistant/drill/new", csrf, tokens["drill_new"],
+            error_id=target_id,
+        )
+        self.assertEqual(created.status_code, 200)
+        location = created.get_json()["next_url"]
+        key = location.rsplit("/", 1)[-1]
+        payload = self.client.get(f"/api/assistant/drill/{key}").get_json()
+        self.assertEqual(payload["target_error"]["id"], target_id)
+        self.assertEqual(payload["target_error"]["title"], "目标题：只应看到甲")
+        self.assertEqual(
+            [item["id"] for item in payload["target_options"]],
+            [other_id, target_id],
+        )
+
+        prepared = self.client.post(
+            f"/api/drill/{key}/prepare",
+            headers={
+                "X-CSRFToken": payload["csrf"],
+                "X-Submission-Token": payload["tokens"]["prepare"],
+                "Accept": "application/json",
+            },
+        )
+        self.assertEqual(prepared.status_code, 200)
+        spec_request = json.dumps(self.llm.messages[-2], ensure_ascii=False)
+        self.assertIn("目标题：只应看到甲", spec_request)
+        self.assertNotIn("干扰题：不应看到乙", spec_request)
+
+    def test_generic_drill_can_choose_an_explicit_error_before_prepare(self):
+        target_id = self.db.create_error("从选择器指定的题", "我直接套公式")
+        other_id = self.db.create_error("不应选中的题", "我漏看条件")
+        self.db.update_grilling(target_id, "[]", "目标机制：没有核对条件")
+        self.db.update_grilling(other_id, "[]", "干扰机制：计算失误")
+
+        entered = self.client.get("/drill")
+        key = entered.headers["Location"].rsplit("/", 1)[-1]
+        payload = self.client.get(f"/api/assistant/drill/{key}").get_json()
+        self.assertEqual(
+            [item["id"] for item in payload["target_options"]],
+            [other_id, target_id],
+        )
+
+        prepared = self.client.post(
+            f"/api/drill/{key}/prepare",
+            data={"error_id": str(target_id)},
+            headers={
+                "X-CSRFToken": payload["csrf"],
+                "X-Submission-Token": payload["tokens"]["prepare"],
+                "Accept": "application/json",
+            },
+        )
+
+        self.assertEqual(prepared.status_code, 200)
+        selected = self.client.get(f"/api/assistant/drill/{key}").get_json()
+        self.assertEqual(selected["target_error"]["id"], target_id)
+        spec_request = json.dumps(self.llm.messages[-2], ensure_ascii=False)
+        self.assertIn("从选择器指定的题", spec_request)
+        self.assertNotIn("不应选中的题", spec_request)
 
     def test_hashed_react_assets_are_immutable_and_gzipped_but_html_is_not_cached(self):
         shell = self.client.get('/')
@@ -171,7 +239,17 @@ class ReactMigrationTests(unittest.TestCase):
         self.assertEqual(payload["composer"], "teach")
         self.assertEqual(payload["next_step"]["code"], "finish_teach_and_drill")
         self.assertEqual(payload["next_step"]["label"], "Drill")
-        self.assertEqual(payload["next_step"]["description"], "继续追问，或进入一道根据历史 Error 生成的练习。")
+        self.assertEqual(payload["next_step"]["description"], "继续追问，或针对当前 Error 做一道新练习。")
+
+        csrf, tokens = self.bootstrap(error_id)
+        finished = self.post_json_token(
+            "/api/assistant/teach/finish", csrf, tokens["teach_finish"],
+            error_id=error_id,
+        )
+        self.assertEqual(finished.status_code, 200)
+        key = finished.get_json()["next_url"].rsplit("/", 1)[-1]
+        drill = self.client.get(f"/api/assistant/drill/{key}").get_json()
+        self.assertEqual(drill["target_error"]["id"], error_id)
 
     def test_attachment_endpoint_checks_error_ownership(self):
         first = self.db.create_error("一", "思路", "答案", attachments=[("image/png", b"png")])

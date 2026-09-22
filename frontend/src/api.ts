@@ -77,6 +77,8 @@ export type ModelInfo = {
 export type DrillPayload = {
   key: string;
   question: string | null;
+  target_error: { id: number; title: string } | null;
+  target_options: { id: number; title: string }[];
   result: { is_correct: boolean; derived_error_id: number | null } | null;
   answer: string;
   pending_attachment_count: number;
@@ -209,9 +211,11 @@ export function saveConfig(bootstrap: Bootstrap, token: string, values: Record<s
   });
 }
 
-export function createDrill(bootstrap: Bootstrap): Promise<{ next_url: string }> {
+export function createDrill(bootstrap: Bootstrap, errorId?: number): Promise<{ next_url: string }> {
   return jsonRequest<{ next_url: string }>("/api/assistant/drill/new", {
-    method: "POST", headers: headers(bootstrap, bootstrap.tokens.drill_new), body: new URLSearchParams(),
+    method: "POST",
+    headers: headers(bootstrap, bootstrap.tokens.drill_new),
+    body: new URLSearchParams(errorId === undefined ? {} : { error_id: String(errorId) }),
   });
 }
 
@@ -219,11 +223,11 @@ export function loadDrill(key: string): Promise<DrillPayload> {
   return jsonRequest<DrillPayload>(`/api/assistant/drill/${encodeURIComponent(key)}`, { method: "GET" });
 }
 
-export function prepareDrill(data: DrillPayload): Promise<{ redirect: string }> {
+export function prepareDrill(data: DrillPayload, errorId: number | null): Promise<{ redirect: string }> {
   return jsonRequest<{ redirect: string }>(`/api/drill/${encodeURIComponent(data.key)}/prepare`, {
     method: "POST",
     headers: { "X-CSRFToken": data.csrf, "X-Submission-Token": data.tokens.prepare, "Accept": "application/json" },
-    body: new URLSearchParams(),
+    body: new URLSearchParams({ error_id: errorId === null ? "" : String(errorId) }),
   });
 }
 

@@ -400,8 +400,20 @@ def _cmd_resume(state, arg):
                 successmsg(f"Error #{idx + 1} 已从错题库删除")
 
 
-@_register("drill", "出综合练习题")
+@_register("drill", "出综合练习题（可指定 Error ID）")
 def _cmd_drill(state, arg):
+    raw_id = arg.strip() if arg else ""
+    error_id = None
+    if raw_id:
+        try:
+            error_id = int(raw_id)
+        except ValueError:
+            errmsg("Error ID 必须是整数")
+            return
+        if error_id <= 0:
+            errmsg("Error ID 必须是正整数")
+            return
+
     def show_stage(stage: DrillStage) -> None:
         if stage == DrillStage.SPEC:
             sysmsg("🧠 正在从近期 Error 中提炼出题规格...")
@@ -409,7 +421,10 @@ def _cmd_drill(state, arg):
             sysmsg("🧩 正在根据出题规格生成新题...")
 
     try:
-        preparation = state.application().prepare_drill(on_stage=show_stage)
+        prepare_kwargs = {"on_stage": show_stage}
+        if error_id is not None:
+            prepare_kwargs["error_id"] = error_id
+        preparation = state.application().prepare_drill(**prepare_kwargs)
     except NoDrillContext as exc:
         sysmsg(str(exc))
         return
@@ -701,7 +716,7 @@ def _cmd_help(state, arg):
             ("/record", "录入新的 error（各字段可按 F2 添加图片 OCR，进入 pending-grill）"),
             ("/ocr [路径]", "识别图片，校对后录入 error"),
             ("/resume", "打开双栏工作台 (进行 Grill 诊断 / Teach 讲解)"),
-            ("/drill", "结合近期 error 生成综合演练测试题"),
+            ("/drill [Error ID]", "生成综合演练题，可指定来源 Error"),
             ("/drills [ID]", "查看已判分 Drill 的目标机制"),
         ]),
         ("📊 状态与看板", [

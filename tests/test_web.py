@@ -430,7 +430,12 @@ class WebApplicationTests(unittest.TestCase):
             headers={'Accept': 'application/json'},
         )
         self.assertEqual(finished.status_code, 200)
-        self.assertEqual(finished.get_json()['redirect'], '/drill')
+        redirect = finished.get_json()['redirect']
+        self.assertRegex(redirect, r'^/drill/[^/]+$')
+        key = redirect.rsplit('/', 1)[-1]
+        drill_payload = self.client.get(f'/api/assistant/drill/{key}').get_json()
+        self.assertEqual(drill_payload['target_error']['id'], active_teach)
+        self.assertEqual(drill_payload['target_error']['title'], '练习前题')
         self.assertEqual(self.db.get_error(active_teach).status, 'done')
         replay = self.client.post(
             drill_path,
@@ -440,7 +445,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(replay.status_code, 409)
 
         done_html = self.client.get(f'/errors/{active_teach}').data.decode()
-        self.assertIn('href="/drill"', done_html)
+        self.assertIn(f'href="/errors/{active_teach}/drill"', done_html)
         self.assertNotIn(f'action="{drill_path}"', done_html)
 
     def test_latex_heavy_historical_title_is_backfilled_and_never_rendered_raw(self):

@@ -195,6 +195,40 @@ class ApplicationBoundaryTests(unittest.TestCase):
         self.assertFalse(judgment.is_correct)
         self.assertIsNotNone(judgment.attempt.derived_error_id)
 
+    def test_drill_preparation_can_target_one_error(self):
+        first = self.db.create_error("FIRST_SOURCE")
+        second = self.db.create_error("SECOND_SOURCE")
+        self.db.update_grilling(first, "[]", "先检查第一个条件")
+        self.db.update_grilling(second, "[]", "先检查第二个条件")
+        spec = {
+            "source_error_number": 1,
+            "target_pattern": {"mechanism": "检查条件", "trigger": "熟悉形式", "failure_behavior": "直接套用", "desired_behavior": "核对条件", "success_signal": "列出条件"},
+            "new_problem": {"domain": "概率", "task_type": "calculate", "setting": "受限样本", "task_goal": "计算概率", "essential_trigger": "条件未自动成立", "solution_strategy": "先确定样本空间", "avoid": ["复杂计算"]},
+            "difficulty": {"level": 3, "reasoning_depth": 3, "calculation_load": 2},
+        }
+        llm = _LLM(json_responses=[spec, {"question": "新题", "reference_answer": "新答"}])
+        app = ErrGrindApplication(self.db, llm, self.prompts, {"provider": "test", "model": "model"})
+
+        preparation = app.prepare_drill(error_id=first)
+
+        self.assertEqual(preparation.source_error_id, first)
+        self.assertIn("FIRST_SOURCE", llm.prompts[0])
+        self.assertNotIn("SECOND_SOURCE", llm.prompts[0])
+
+    def test_drill_targets_only_include_errors_with_usable_grill_context(self):
+        pending_grill = self.db.create_error("还没有诊断")
+        first = self.db.create_error("FIRST_SOURCE")
+        second = self.db.create_error("SECOND_SOURCE")
+        self.db.update_grilling(first, "[]", "先检查第一个条件")
+        self.db.update_grilling(second, "[]", "先检查第二个条件")
+        app = ErrGrindApplication(self.db, _LLM(), self.prompts)
+
+        targets = app.list_drill_targets()
+
+        self.assertEqual([item.id for item in targets], [second, first])
+        self.assertNotIn(pending_grill, [item.id for item in targets])
+        self.assertTrue(all(item.grilling_diagnostic_state is None for item in targets))
+
     def test_invalid_judge_contract_does_not_write_attempt_or_derived_error(self):
         source = self.db.create_error("原题")
         self.db.update_grilling(source, "[]", "摘要")

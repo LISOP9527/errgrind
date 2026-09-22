@@ -7,21 +7,30 @@
   <div class="drill-start" aria-live="polite">
     <h1>Drill</h1>
     {% if state == 'preparing' %}
-      <p class="drill-lead">正在根据历史 Error 生成练习…</p>
+      <p class="drill-lead">{% if target_error %}正在为“{{ target_error.title }}”生成练习…{% else %}正在根据历史 Error 生成练习…{% endif %}</p>
     {% elif state == 'failed' %}
       <p class="drill-lead">生成练习失败。</p>
       <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-working-label="正在根据历史 Error 生成练习…">{{ credentials(url_for('drill_prepare', key=key)) }}<button type="submit">重试</button></form>
     {% else %}
       <div class="drill-intro">
+        {% if target_error %}
+        <p class="drill-lead">为“{{ target_error.title }}”生成一题新的练习。</p>
+        <p class="drill-description">这道练习只使用当前 Error 的诊断作为出题目标。</p>
+        {% else %}
         <p class="drill-lead">根据历史 Error 生成一题新的练习。</p>
         <p class="drill-description">开始后会从已完成诊断的 Error 中选择一个目标并生成题目。</p>
+        {% endif %}
       </div>
-      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-working-label="正在根据历史 Error 生成练习…">{{ credentials(url_for('drill_prepare', key=key)) }}<button type="submit">开始 Drill</button></form>
+      <form method="post" action="{{ url_for('drill_prepare', key=key) }}" data-action data-working-label="正在生成练习…">
+        {{ credentials(url_for('drill_prepare', key=key)) }}
+        <label class="drill-target-field"><span>练习目标</span><select name="error_id"><option value="">综合历史 Error</option>{% for target in target_options %}<option value="{{ target.id }}"{% if target_error and target.id == target_error.id %} selected{% endif %}>{{ target.title }}</option>{% endfor %}</select></label>
+        <button type="submit">开始 Drill</button>
+      </form>
     {% endif %}
   </div>
   {% else %}
   <div class="drill-question">
-    <p class="drill-context">根据历史 Error 生成</p>
+    <p class="drill-context">{% if target_error %}针对“{{ target_error.title }}”生成{% else %}根据历史 Error 生成{% endif %}</p>
     <div class="markdown">{{ md(question) }}</div>
   </div>
   {% if pending_attachment_count %}<p class="attachment-indicator drill-attachment-status">＋ 图片附件已保留，可直接重试提交</p>{% endif %}
@@ -30,7 +39,7 @@
     <strong class="verdict-title">{{ '正确' if result.is_correct else '错误' }}</strong>
     {% if result.is_correct %}
     <p>这次练习完成了。</p>
-    <div class="inline-actions"><a class="text-button" href="{{ url_for('drill_new') }}">再做一道 <span aria-hidden="true">→</span></a><a class="text-button muted-button" href="{{ url_for('index') }}">返回</a></div>
+    <div class="inline-actions"><a class="text-button" href="{{ url_for('drill_for_error', error_id=target_error.id) if target_error else url_for('drill_new') }}">再做一道 <span aria-hidden="true">→</span></a><a class="text-button muted-button" href="{{ url_for('index') }}">返回</a></div>
     {% else %}
     <p>这次回答已经记录，可以继续查看由此产生的 Error。</p>
     <a class="text-button" href="{{ url_for('error_detail', error_id=result.derived_error_id) if result.derived_error_id else url_for('index') }}">继续查看这道 Error <span aria-hidden="true">→</span></a>

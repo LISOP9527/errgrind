@@ -632,15 +632,24 @@ class Database:
             )
             return attachment_ids
 
-    def get_drill_context(self, limit: int) -> list[DrillContext]:
+    def get_drill_context(
+        self, limit: int, *, error_id: int | None = None
+    ) -> list[DrillContext]:
         if limit <= 0:
             return []
+        where = (
+            "WHERE id = ? AND status IN ('pending-teach', 'done') "
+            "AND grilling_summary IS NOT NULL"
+            if error_id is not None
+            else "WHERE status IN ('pending-teach', 'done') "
+            "AND grilling_summary IS NOT NULL"
+        )
+        params = (error_id,) if error_id is not None else ()
+        order = "" if error_id is not None else "ORDER BY updated_at DESC, id DESC"
         rows = self.conn.execute(
             "SELECT id, question, grilling_summary, grilling_diagnostic_state "
-            "FROM error_records "
-            "WHERE status IN ('pending-teach', 'done') "
-            "AND grilling_summary IS NOT NULL "
-            "ORDER BY updated_at DESC, id DESC",
+            f"FROM error_records {where} {order}",
+            params,
         ).fetchall()
         context = []
         for row in rows:

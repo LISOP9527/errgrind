@@ -3,3 +3,7 @@ dist/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+playwright-report/
+test-results/
+blob-report/
+.playwright-system-deps/
