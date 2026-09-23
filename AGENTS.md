@@ -35,6 +35,10 @@ Drill 遵循 `DrillSpec → Draft → Judge` 流程。每次完成判分都写�
 
 ## Core/Application 架构原则
 
+本节约束当前 Python、CLI 与 React WebUI 实现。新独立产品与 MCP 的共同业务边界
+按[统一 Error 调查与 agent fork 决策](design/decisions/2026-09-23-error-episode-and-agent-fork.md)
+重新划分；现有 `ErrGrindApplication` 的模型编排和三字段 Record 不作为新产品的固定接口。
+
 业务工作流的依赖方向固定为：
 
 ```text
@@ -52,7 +56,7 @@ CLI / TUI 或未来其他 frontend
 - 为流式显示或交互进度提供的可选 callback，只能传递 token、生命周期或阶段事件；Application 不得接收或生成终端渲染对象。
 - Application 的所有公开返回值（包括 Teach）与用户可见异常都必须隐藏 Grill 的内部诊断账本、variant 答案和预测；模型原始结构化输出只能用于内部校验和 repair。
 - 优先保持当前实现所需的最小解耦。不为架构形式引入尚无现实消费者的 repository interface、DI framework 或复杂 class hierarchy。
-- 未来 MCP、GUI 或 Mobile 都应作为 `ErrGrindApplication` 的薄 adapter，不得 import CLI、模拟终端交互或复制 workflow。本原则不表示现在需要实现 MCP SDK、MCP server 或 MCP-specific contract。
+- 当前其他 frontend 应作为 `ErrGrindApplication` 的薄 adapter，不得 import CLI、模拟终端交互或复制 workflow。新独立产品和 MCP 共享重新划分的业务 Core，不得各自复制 Error/Evidence 工作流或持久化权威。
 - 修改 Grill、Teach、Drill、会话恢复、状态转换或 Drill 时，优先直接测试 application boundary，同时保留必要的 CLI integration tests，确认 adapter 仍正确处理输入、渲染与中断。
 
 ## 复用、搜索与技术决策原则

@@ -1,5 +1,9 @@
 # 错题录入与图片输入
 
+本文记录当前 React WebUI 与 Python Application 的实现。新独立产品改为
+[统一 Error 调查](decisions/2026-09-23-error-episode-and-agent-fork.md)：用户看到一段可修订的
+完整 Error 描述，Record 与 Grill 共用一段调查对话；下述三字段草稿只用于当前实现。
+
 `/record` 是统一录题入口。Web 接受文字和零或多张 PNG、JPEG、WebP 图片，并把每一轮
 文字补充、当前可编辑草稿和本轮图片作为一次多模态 user turn 交给当前模型，更新
 `question`、`user_thoughts`、`reference_answer` 结构化草稿。模型没有从材料中得到的

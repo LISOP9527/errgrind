@@ -7,11 +7,15 @@
 3. **标准数据协议**：文本与公式统一使用标准 Markdown + LaTeX 输出，确保跨平台（TUI / Web GUI / Mobile）无缝复用渲染。
 4. **渲染能力由 UI 适配**：标准内容不因终端能力写回降级格式；TUI 在统一边界转换为 Unicode/线性公式，未来 GUI / Mobile 使用各自的原生 Markdown 与数学渲染器。具体约束见[终端内容渲染边界](decisions/2026-07-27-terminal-content-rendering.md)。
 
-当前 MVP 以 `errgrind.application.ErrGrindApplication` 作为前端可复用的
+当前 Python/React 实现以 `errgrind.application.ErrGrindApplication` 作为前端可复用的
 application 边界。它编排现有 DB、LLM 与 Prompt 基础设施，并返回结构化的对话和
 Drill 结果；它不引用 CLI、Rich 或 prompt_toolkit。CLI 只负责终端输入循环、确认、
-流式 token 的终端渲染和结果展示。未来 MCP、GUI 或 Mobile 应调用同一 application
-操作，而不是复制 Grill / Teach / Drill 流程或直接组合数据库与模型调用。
+流式 token 的终端渲染和结果展示。当前其他 frontend 应调用同一 application 操作，
+不复制 Grill / Teach / Drill 流程或直接组合数据库与模型调用。
+
+新独立产品与 MCP 的共同边界见[统一 Error 调查与 agent fork 决策](decisions/2026-09-23-error-episode-and-agent-fork.md)。
+agent runtime 可以接管编排，但业务 Core 仍统一负责证据来源、提交与状态规则、公开结果和
+Drill 原子记录；不能让两种入口各自建立 Error 工作流事实来源。
 
 
 ## 本机 Web adapter

@@ -19,6 +19,7 @@ YYYY-MM-DD-short-title.md
 
 ## 当前决策
 
+- [统一 Error 调查与独立产品 agent fork](2026-09-23-error-episode-and-agent-fork.md)：新产品以可恢复 episode 承载连续调查，公开 Error 使用完整描述；dsh 是首个 fork 验证基础。当前 React/Application 仍按既有契约运行。
 - [Web Settings 编辑共享配置](2026-09-14-web-settings.md)：Settings 编辑共享模型与工作流参数，密钥不回显，保存后更新当前 Web 进程。
 - [Single-workspace WebUI](2026-09-10-single-workspace-webui.md)：Web 围绕 Error 对象、临时 action 与单一主 workspace 组织，不把 CLI slash commands 或内部 workflow 阶段展开成页面结构。
 - [Drill 目标查询与判题结果展示](2026-09-08-drill-target-query-and-verdict.md)：通过 `/drills` 查看历史目标机制，判题后的即时结果仅展示正确或错误。

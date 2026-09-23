@@ -1,5 +1,9 @@
 # Application 工作流边界
 
+本文描述当前 Python/React 产品。新独立产品允许 agent runtime 接管模型编排，
+独立产品与 MCP 共享的业务 Core 见
+[2026-09-23 决策](2026-09-23-error-episode-and-agent-fork.md)。
+
 ## Context
 
 Grill、Teach 与 Drill 的状态转换、Prompt 组装、LLM 调用、输出契约校验和数据库

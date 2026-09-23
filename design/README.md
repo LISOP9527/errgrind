@@ -4,16 +4,17 @@
 
 ## 设计文档
 
-- [版本规划 / Version Plan](version-plan.md)：V1 Core → V1 Product / UX → V2 的开发顺序、验收方向与有意推迟的长期能力。
+- [版本规划 / Version Plan](version-plan.md)：V1 核心闭环、独立产品 fork 与 MCP 并行验证、V2 长期能力的开发方向。
 - [长期架构](long-term-architecture.md)：Evidence -> State -> Policy -> Action -> New Evidence 的系统闭环。
 - [核心原则](core-principles.md)：ErrGrind 如何围绕 Evidence、可更新 State、Policy 和减少未来 Error 设计。
 - [Pattern State 演进提案](pattern-state-proposal.md)：从单次 Grill 假设逐步建立可审查、可证伪的 Pattern State，区分真实 Evidence 与干预结果。
 - [“减少未来 Error”的验证策略](evaluation-strategy.md)：区分流程、模型、行为迁移和真实结果，说明 recurrence、盲法关联与学习机会分母。
-- [架构解耦原则](ui-decoupling.md)：Core/UI 边界与本机 thin Web adapter；[WebUI 安装与使用](../README.md)。
-- [错题录入与图片输入](record-input.md)：文字与图片直接进入同一轮多模态整理，校对后保存为同一条 Error。
+- [架构解耦原则](ui-decoupling.md)：当前 Application/Web 边界及新 fork 的业务 Core 边界；[WebUI 安装与使用](../README.md)。
+- [错题录入与图片输入](record-input.md)：当前 React 产品的三字段草稿与图片路径；新产品的统一调查见下方决策。
 
 ## 决策记录
 
+- [统一 Error 调查与独立产品 agent fork](decisions/2026-09-23-error-episode-and-agent-fork.md)：Record 与 Grill 在新产品中合为连续调查，公开 Error 使用完整可修订描述；选择 dsh 作为首个 fork 验证基础，并保留与 MCP 共享的业务 Core。
 - [Web Settings 编辑共享配置](decisions/2026-09-14-web-settings.md)：在 WebUI 动态读取 Provider 模型目录，选择模型和 Codex effort，并自动、安全地保存完整共享配置。
 - [Drill 目标查询与判题结果展示](decisions/2026-09-08-drill-target-query-and-verdict.md)：按需查询历史题目的目标机制，判题后仅展示对错。
 - [Drill 答题图片输入](decisions/2026-09-08-drill-answer-ocr.md)：历史 OCR 方案；Web 路径已由直接多模态附件决策 supersede，CLI 兼容能力可暂留。

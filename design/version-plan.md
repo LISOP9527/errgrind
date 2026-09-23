@@ -3,6 +3,8 @@
 本文安排 ErrGrind 从当前数学 MVP 到 V1、V2 的开发顺序，并保存有意推迟的方向。
 这是 roadmap，不是 ADR、已完成清单或冻结架构；版本表示产品阶段，不承诺发布日期。
 已有设计与决策继续约束实现，实际进度见 [todo](../todo.md)，设计入口见[设计索引](README.md)。
+[统一 Error 调查与 agent fork 决策](decisions/2026-09-23-error-episode-and-agent-fork.md)
+已提前启动独立产品 fork 验证；本页早期 V1/V2 描述涉及 fork 时以该决策为准。
 
 ## 开发顺序
 
@@ -11,19 +13,19 @@ Now / V1 Core
     Grill → Teach → Drill/Judge reliability
                   ↓
 V1 Product / UX
-    UX + WebUI + MCP + real-world usability
+    UX + independent agent product fork + MCP + real-world usability
                   ↓
 V2
     Long-term State / Pattern State
     Policy
     More Actions / Evidence Sources
     Multi-domain / Multi-subject expansion
-    Dedicated agent harness / fork
 ```
 
 V1 Core 与 V1 Product 是同一个 V1 方向的连续阶段：先把固定工作流做可靠，再优先降低真实使用的成本。
 必要的可用性交互可以随 Core 一起改进，但复杂 Policy 不应抢在核心闭环与 UX 验证之前。
-V2 的五类方向是待研究的扩展，不要求同时落地，也不预先决定它们的内部算法或技术选型。
+V2 的长期 State、Policy、更多 Action/Evidence 和多领域方向仍待研究；独立产品 fork
+已进入 V1 的技术验证，不表示长期 Pattern 或复杂 Policy 提前实现。
 
 ## 产品定位与 Evidence 边界
 
@@ -47,9 +49,11 @@ Error → Grill → Teach → Drill → new Error / Evidence
   它不是 Teach 的即时考试，也不凭一次正确就证明机制已改变。
 - 一次 episode diagnosis 不等于长期确认 Pattern；未来真实学习中的独立 Evidence 更重要。
 
-这条产品阶段方向不等于数据库状态枚举，也不要求每次操作线性执行。既有 Error 状态仍为
+这条产品阶段方向不等于数据库状态枚举，也不要求每次操作线性执行。当前 Python/React 产品的 Error 状态仍为
 `pending-grill → pending-teach → done`，会话中断、完成后只读和 Teach 可继续等语义沿用
 [会话生命周期决策](decisions/2026-07-27-conversation-lifecycle.md)。
+新独立产品把 Record 与 Grill 合为一段可恢复调查；锚点确认和诊断结束分别提交，
+公开 Error 使用完整描述，详见[新决策](decisions/2026-09-23-error-episode-and-agent-fork.md)。
 
 V1 Evidence 以 authentic Error episode 为主要 anchor；该 episode 内的原始作答/行为、
 记录的思路（`initial_user_thoughts`）、回顾性重建和 grounded Grill 回答可以成为 Evidence。
@@ -235,22 +239,13 @@ V2 再研究物理、化学、语言学习、写作，以及其他适合 Error-d
 长期架构已有 Coding 候选也保留在此范围内。核心抽象可能复用，但不能假定数学的 Error ontology、Judge、
 Drill 可以直接通用：domain-specific Evidence、Judge、Action 和输入形式可能不同，需逐领域验证。
 
-### 5. Dedicated agent harness / fork
+### 独立产品 fork 与 MCP
 
-保留长期评估 dedicated harness / fork 的方向。当 Long-term State、Policy、多种 Action、多 Evidence source、
-retrieval/context management、多 host 与更复杂 session lifecycle 出现后，当前简单 CLI/application workflow
-可能不足以承载运行需求。届时可以比较：
-
-- fork 一个成熟、轻量的 agent/harness；
-- 基于现有 agent runtime 做 ErrGrind specialization；
-- 继续让 ErrGrind core 通过 MCP 被外部 host 调用。
-
-当前不决定 fork 哪个项目，也不实现。复用原则是：
-
-> Reuse implementations aggressively; import ontologies conservatively.
-
-可以大胆复用 runtime、context、tool、retrieval 基础设施，但 ErrGrind 的 Evidence / Pattern / Policy / Action
-概念体系不能被上游 ontology 反向绑架。MCP 作为 V1 入口不意味着必须选择其中一种 V2 runtime 路径。
+2026-09-23 的[决策](decisions/2026-09-23-error-episode-and-agent-fork.md)已将
+dedicated agent fork 的首轮验证提前到 V1 Product / UX。独立产品以 dsh fork 为首个
+验证基础，继承 Web 与 runtime 能力；MCP 继续作为并行入口，两者共享 ErrGrind
+业务 Core。此项不依赖 V2 长期 State、复杂 Policy 或多领域扩展，也不预先承诺
+长期采用 dsh。
 
 ## Explicit non-goals / deferred 方向
 
@@ -260,11 +255,11 @@ retrieval/context management、多 host 与更复杂 session lifecycle 出现后
 | 复杂 adaptive Policy | 有意推迟到 V2；V1 先验证固定工作流 |
 | 更多 Action、主动测量与辅助 Evidence source | V2 按 Error mechanism 价值逐项验证；V1 保留已有 Grill Probe |
 | 多学科扩张 | 有意推迟到 V2；V1 聚焦数学 |
-| Dedicated harness / fork | 有意推迟到 V2 评估；不提前选项目 |
+| 独立产品 fork | V1 先验证 dsh fork 的真实数学错题闭环；长期采用取决于验证结果 |
 | 大规模 recommendation system | V1 不优先；V2 也需先证明 State / Policy 与实际需求 |
 | 通用用户画像、为了 agent 化而 agent 化 | V1 不做；V2 的 State / agent 扩展仍受产品定位约束，不承诺转向通用 tutor |
 
-Deferred 不等于 abandoned：长期 State、Policy、更多 Action / Evidence、多领域和 harness/fork 都保留。
+Deferred 不等于 abandoned：长期 State、Policy、更多 Action / Evidence 和多领域都保留。
 但推迟某类能力，不代表 V2 自动接纳与 Error 无关的通用画像或无目的的 agent 化。
 
 ## 与既有文档的兼容性

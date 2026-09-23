@@ -1,5 +1,9 @@
 # Single-workspace WebUI
 
+本文约束当前 React WebUI。新独立产品保留 Error 工作区与连续对话方向，但将 Record
+与 Grill 合为调查、公开 Error 改为完整描述；见
+[2026-09-23 决策](2026-09-23-error-episode-and-agent-fork.md)。
+
 ## Context
 
 现有 CLI 的 slash commands 是功能逐步增加后的实现接口，不是 Web 产品的信息架构。把 `/record`、Grill、Teach、Drill、历史查询等逐一展开成页面或 tab，会把 CLI 的历史结构固化到 Web。
