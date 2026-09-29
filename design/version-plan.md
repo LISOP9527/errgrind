@@ -52,7 +52,7 @@ Error → Grill → Teach → Drill → new Error / Evidence
 这条产品阶段方向不等于数据库状态枚举，也不要求每次操作线性执行。当前 Python/React 产品的 Error 状态仍为
 `pending-grill → pending-teach → done`，会话中断、完成后只读和 Teach 可继续等语义沿用
 [会话生命周期决策](decisions/2026-07-27-conversation-lifecycle.md)。
-新独立产品把 Record 与 Grill 合为一段可恢复调查；锚点确认和诊断结束分别提交，
+新独立产品把 Record 与 Grill 合为一段可恢复调查；最终 Error 描述的用户确认与诊断完成一起提交，
 公开 Error 使用完整描述，详见[新决策](decisions/2026-09-23-error-episode-and-agent-fork.md)。
 
 V1 Evidence 以 authentic Error episode 为主要 anchor；该 episode 内的原始作答/行为、
