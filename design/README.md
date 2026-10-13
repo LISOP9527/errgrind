@@ -11,7 +11,6 @@
 - [“减少未来 Error”的验证策略](evaluation-strategy.md)：区分流程、模型、行为迁移和真实结果，说明 recurrence、盲法关联与学习机会分母。
 - [架构解耦原则](ui-decoupling.md)：当前 Application/Web 边界及新 fork 的业务 Core 边界；[WebUI 安装与使用](../README.md)。
 - [错题录入与图片输入](record-input.md)：当前 React 产品的三字段草稿与图片路径；新产品的统一调查见下方决策。
-- [Related Work 调研（2026-10）](research/related-work-2026-10.md)：GitHub 852 个去重候选扫描结论（无同款闭环；Diagnos 最接近且已实测，含其双轴判分缺陷实锤）、逐类评估与可带走设计点；原始数据在同目录 `candidates.tsv` / `results.jsonl` / `queries.txt`。
 
 ## 决策记录
 
